@@ -4,10 +4,7 @@ import { getMarketSnapshot } from './market.js';
 import { buildBeginnerTradePlan, type RiskLevel } from './domain.js';
 import { getLocale, t } from './i18n.js';
 
-function menu(locale: 'en' | 'ar'): InlineKeyboard {
-  const x = t(locale);
-  return new InlineKeyboard().text(x.markets, 'markets').text(x.trade, 'trade').row().text(x.alerts, 'alerts').text(x.learn, 'learn').row().text(x.pro, 'pro').text(x.help, 'help');
-}
+function menu(locale: 'en' | 'ar'): InlineKeyboard { const x = t(locale); return new InlineKeyboard().text(x.markets, 'markets').text(x.trade, 'trade').row().text(x.alerts, 'alerts').text(x.learn, 'learn').row().text(x.pro, 'pro').text(x.help, 'help'); }
 function riskMenu(locale: 'en' | 'ar'): InlineKeyboard { const x = t(locale); return new InlineKeyboard().text(x.low, 'risk:low').row().text(x.medium, 'risk:medium').row().text(x.high, 'risk:high'); }
 function nav(locale: 'en' | 'ar'): InlineKeyboard { const x = t(locale); return new InlineKeyboard().text(x.trade, 'trade').text(x.home, 'home'); }
 
@@ -46,17 +43,7 @@ export function createBot(): Bot {
   return bot;
 }
 
-async function sendMarkets(ctx: Parameters<Bot['command']>[1] extends never ? never : any, locale: 'en' | 'ar'): Promise<void> {
-  const x = t(locale); const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
-  await ctx.reply(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\n${x.liveReady}`, { reply_markup: nav(locale) });
-}
-async function editMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
-  const x = t(locale); const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
-  await ctx.editMessageText(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\n${x.liveReady}`, { reply_markup: nav(locale) });
-}
+async function sendMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> { const x = t(locale); const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]); await ctx.reply(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\n${x.liveReady}`, { reply_markup: nav(locale) }); }
+async function editMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> { const x = t(locale); const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]); await ctx.editMessageText(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\n${x.liveReady}`, { reply_markup: nav(locale) }); }
 
-export async function startBot(): Promise<void> {
-  if (!config.botToken) throw new Error('TELEGRAM_BOT_TOKEN is required to start the bot.');
-  const bot = createBot();
-  await bot.start({ onStart: (info) => console.log(`CryptoPulse Pro started as @${info.username}`) });
-}
+export async function startBot(): Promise<void> { if (!config.botToken) throw new Error('TELEGRAM_BOT_TOKEN is required to start the bot.'); const bot = createBot(); await bot.start({ onStart: (info) => console.log(`CryptoPulse Pro started as @${info.username}`) }); }
