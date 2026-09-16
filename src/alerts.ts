@@ -1,14 +1,18 @@
+export type AlertCondition = 'above' | 'below' | 'change24h';
+
 export interface PriceAlert {
   id: string;
   userId: string;
   symbol: string;
-  operator: 'above' | 'below';
-  targetPrice: number;
+  condition: AlertCondition;
+  threshold: number;
   active: boolean;
   createdAt: string;
 }
 
-export function isTriggered(alert: PriceAlert, price: number): boolean {
+export function isAlertTriggered(alert: PriceAlert, price: number, change24h: number): boolean {
   if (!alert.active) return false;
-  return alert.operator === 'above' ? price >= alert.targetPrice : price <= alert.targetPrice;
+  if (alert.condition === 'above') return price >= alert.threshold;
+  if (alert.condition === 'below') return price <= alert.threshold;
+  return Math.abs(change24h) >= Math.abs(alert.threshold);
 }
