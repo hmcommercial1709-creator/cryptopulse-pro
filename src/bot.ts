@@ -2,96 +2,57 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { config, requireBotToken } from './config.js';
 import { getMarketSnapshot } from './market.js';
 import { buildBeginnerTradePlan, type RiskLevel } from './domain.js';
+import { getLocale, t } from './i18n.js';
 
-const riskButtons = new InlineKeyboard()
-  .text('🟢 Beginner / Low risk', 'risk:low').row()
-  .text('🟡 Balanced / Medium', 'risk:medium').row()
-  .text('🔴 Aggressive / High', 'risk:high');
+function menu(locale: 'en' | 'ar'): InlineKeyboard {
+  const x = t(locale);
+  return new InlineKeyboard().text(x.markets, 'markets').text(x.trade, 'trade').row().text(x.alerts, 'alerts').text(x.learn, 'learn').row().text(x.pro, 'pro').text(x.help, 'help');
+}
+function riskMenu(locale: 'en' | 'ar'): InlineKeyboard { const x = t(locale); return new InlineKeyboard().text(x.low, 'risk:low').row().text(x.medium, 'risk:medium').row().text(x.high, 'risk:high'); }
+function nav(locale: 'en' | 'ar'): InlineKeyboard { const x = t(locale); return new InlineKeyboard().text(x.trade, 'trade').text(x.home, 'home'); }
 
 export function createBot(): Bot {
   const bot = new Bot(requireBotToken());
+  bot.command('start', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.reply(t(locale).start, { reply_markup: menu(locale) }); });
+  bot.command('markets', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await sendMarkets(ctx, locale); });
+  bot.command('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.reply(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
 
-  bot.command('start', async (ctx) => {
-    await ctx.reply(
-      '🚀 CryptoPulse Pro\n\n' +
-      'A beginner-friendly crypto command center.\n\n' +
-      'Choose what you want to do:',
-      {
-        reply_markup: new InlineKeyboard()
-          .text('📊 Markets', 'markets').text('🧭 Trade Helper', 'trade').row()
-          .text('🔔 Alerts', 'alerts').text('📚 Learn Trading', 'learn').row()
-          .text('💎 Pro', 'pro').text('ℹ️ Help', 'help'),
-      },
-    );
-  });
+  for (const locale of ['en', 'ar'] as const) {
+    const x = t(locale);
+    void bot.api.setMyCommands([
+      { command: 'start', description: locale === 'ar' ? 'بدء CryptoPulse' : 'Start CryptoPulse' },
+      { command: 'markets', description: x.markets.replace(/^[^ ]+ /, '') },
+      { command: 'trade', description: x.trade.replace(/^[^ ]+ /, '') },
+      { command: 'alerts', description: x.alerts.replace(/^[^ ]+ /, '') },
+      { command: 'learn', description: x.learn.replace(/^[^ ]+ /, '') },
+      { command: 'help', description: x.help.replace(/^[^ ]+ /, '') },
+    ], { language_code: locale });
+  }
 
-  bot.callbackQuery('markets', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    const [btc, eth, sol] = await Promise.all([
-      getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL'),
-    ]);
-    await ctx.editMessageText(
-      `📊 Market snapshot\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\nData adapters are ready for live provider integration.`,
-      { reply_markup: new InlineKeyboard().text('🧭 Trade Helper', 'trade').text('⬅️ Home', 'home') },
-    );
-  });
-
-  bot.callbackQuery('trade', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      '🧭 Trade Helper\n\nTell me your experience level. CryptoPulse will explain the plan in plain language and show entry, stop-loss and target concepts.',
-      { reply_markup: riskButtons },
-    );
-  });
-
+  bot.callbackQuery('markets', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await editMarkets(ctx, locale); });
+  bot.callbackQuery('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
   bot.callbackQuery(/^risk:(low|medium|high)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    const risk = ctx.match[1] as RiskLevel;
-    const snapshot = await getMarketSnapshot('BTC');
-    const plan = buildBeginnerTradePlan(snapshot, risk);
-    await ctx.editMessageText(
-      `🧠 BTC educational plan\n\n` +
-      `Direction: ${plan.side.toUpperCase()}\n` +
-      `Reference price: $${plan.entry.toLocaleString()}\n` +
-      `Stop-loss example: $${plan.stopLoss.toFixed(2)}\n` +
-      `Target example: $${plan.takeProfit.toFixed(2)}\n` +
-      `Risk level: ${plan.riskLevel}\n` +
-      `Risk/reward model: ${plan.riskReward}:1\n\n` +
-      `⚠️ ${plan.explanation}`,
-      { reply_markup: new InlineKeyboard().text('🔄 Try another level', 'trade').text('🏠 Home', 'home') },
-    );
+    const locale = getLocale(ctx.from?.language_code); const x = t(locale); await ctx.answerCallbackQuery();
+    const risk = ctx.match[1] as RiskLevel; const snapshot = await getMarketSnapshot('BTC'); const plan = buildBeginnerTradePlan(snapshot, risk);
+    const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
+    await ctx.editMessageText(`${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: $${plan.entry.toLocaleString()}\n${x.stop}: $${plan.stopLoss.toFixed(2)}\n${x.target}: $${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1\n\n${x.riskNote}`, { reply_markup: new InlineKeyboard().text(x.retry, 'trade').text(x.home, 'home') });
   });
-
-  bot.callbackQuery('learn', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      '📚 Trading made simple\n\n1. Choose an asset.\n2. Understand the trend and volatility.\n3. Define how much you can afford to lose.\n4. Set a stop before entering.\n5. Never risk money you cannot afford to lose.\n\nCryptoPulse Pro is designed to explain each step before a user acts.',
-      { reply_markup: new InlineKeyboard().text('🧭 Trade Helper', 'trade').text('🏠 Home', 'home') },
-    );
-  });
-
-  bot.callbackQuery('alerts', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText('🔔 Alerts\n\nAlert infrastructure is ready. Live price-provider integration and user alert storage will be added next.', { reply_markup: new InlineKeyboard().text('🏠 Home', 'home') });
-  });
-
-  bot.callbackQuery('pro', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText('💎 CryptoPulse Pro\n\nPremium features will use Telegram Stars for digital services. No fake guarantees, hidden charges, or misleading performance claims.', { reply_markup: new InlineKeyboard().text('🏠 Home', 'home') });
-  });
-
-  bot.callbackQuery('help', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText('ℹ️ Help\n\nCryptoPulse Pro explains market information and trading concepts for beginners. It does not guarantee profits or replace professional financial advice.', { reply_markup: new InlineKeyboard().text('🏠 Home', 'home') });
-  });
-
-  bot.callbackQuery('home', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText('🚀 CryptoPulse Pro\n\nChoose what you want to do:', { reply_markup: new InlineKeyboard().text('📊 Markets', 'markets').text('🧭 Trade Helper', 'trade').row().text('🔔 Alerts', 'alerts').text('📚 Learn Trading', 'learn').row().text('💎 Pro', 'pro').text('ℹ️ Help', 'help') });
-  });
-
+  bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).learnText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).alertsText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).proText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).helpText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).start, { reply_markup: menu(locale) }); });
   bot.catch((error) => console.error('CryptoPulse bot error:', error.error));
   return bot;
+}
+
+async function sendMarkets(ctx: Parameters<Bot['command']>[1] extends never ? never : any, locale: 'en' | 'ar'): Promise<void> {
+  const x = t(locale); const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
+  await ctx.reply(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\n${x.liveReady}`, { reply_markup: nav(locale) });
+}
+async function editMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
+  const x = t(locale); const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
+  await ctx.editMessageText(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()}\nETH: $${eth.price.toLocaleString()}\nSOL: $${sol.price.toLocaleString()}\n\n${x.liveReady}`, { reply_markup: nav(locale) });
 }
 
 export async function startBot(): Promise<void> {
