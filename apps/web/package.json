@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@tonconnect/ui-react": "^2.4.1",
     "next": "^15.5.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
