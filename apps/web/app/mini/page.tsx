@@ -76,6 +76,23 @@ export default function MiniTradingTerminal() {
     void loadMarkets();
     void loadUserData();
     void track('mini_open');
+
+    try {
+      const startParam = (new URLSearchParams(window.location.search).get('tgWebAppStartParam') ?? '').trim().slice(0, 64);
+      const initData = window.Telegram?.WebApp?.initData ?? '';
+      if (startParam && initData) {
+        const key = `cryptopulse:startapp:${startParam}`;
+        if (!window.sessionStorage.getItem(key)) {
+          window.sessionStorage.setItem(key, '1');
+          void fetch('/api/growth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
+            body: JSON.stringify({ event: 'startapp_open', metadata: { startParam } }),
+          }).catch(() => undefined);
+        }
+      }
+    } catch { /* attribution must never affect Mini App availability */ }
+
     const timer = window.setInterval(() => void loadMarkets(), 45_000);
     return () => window.clearInterval(timer);
   }, [loadMarkets, loadUserData, track]);
