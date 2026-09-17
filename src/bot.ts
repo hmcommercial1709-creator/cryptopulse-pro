@@ -76,7 +76,7 @@ export function createBot(): Bot {
     ], { language_code: locale });
   }
 
-  bot.inlineQuery(async (ctx) => {
+  bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const symbols = query ? [query] : ['BTC', 'ETH', 'SOL'];
     const locale = getLocale(ctx.from?.language_code);
