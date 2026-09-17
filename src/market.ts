@@ -62,9 +62,10 @@ function toSnapshot(requested: string, quote: CmcQuote | undefined): MarketSnaps
 
 async function fetchQuotes(symbols: string[]): Promise<Map<string, MarketSnapshot>> {
   const normalized = [...new Set(symbols.map(normalizeSymbol))];
+  if (normalized.length === 0) return new Map();
+
   const allKnown = normalized.every((symbol) => Boolean(coinIds[symbol]));
   const params = new URLSearchParams({ convert: 'USD' });
-
   if (allKnown) params.set('id', normalized.map((symbol) => coinIds[symbol]).join(','));
   else params.set('symbol', normalized.join(','));
 
@@ -95,6 +96,8 @@ async function fetchQuotes(symbols: string[]): Promise<Map<string, MarketSnapsho
 
 export async function getMarketSnapshots(symbols: string[]): Promise<MarketSnapshot[]> {
   const normalized = [...new Set(symbols.map(normalizeSymbol))];
+  if (normalized.length === 0) return [];
+
   const now = Date.now();
   const result = new Map<string, MarketSnapshot>();
   const missing: string[] = [];
@@ -115,10 +118,16 @@ export async function getMarketSnapshots(symbols: string[]): Promise<MarketSnaps
     }
   }
 
-  return normalized.map((symbol) => result.get(symbol)!).filter(Boolean);
+  return normalized.map((symbol) => {
+    const snapshot = result.get(symbol);
+    if (!snapshot) throw new Error(`Market snapshot missing for ${symbol}`);
+    return snapshot;
+  });
 }
 
 export async function getMarketSnapshot(symbol: string): Promise<MarketSnapshot> {
-  const [snapshot] = await getMarketSnapshots([symbol]);
+  const snapshots = await getMarketSnapshots([symbol]);
+  const snapshot = snapshots[0];
+  if (!snapshot) throw new Error(`Market snapshot missing for ${symbol}`);
   return snapshot;
 }
