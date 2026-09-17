@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-describe('alert engine contract', () => {
-  it('uses inclusive threshold semantics', () => {
-    const above = (price: number, target: number) => price >= target;
-    const below = (price: number, target: number) => price <= target;
-    expect(above(100, 100)).toBe(true);
-    expect(below(100, 100)).toBe(true);
-    expect(above(99.99, 100)).toBe(false);
-    expect(below(100.01, 100)).toBe(false);
-  });
+test('alert engine contract uses inclusive threshold semantics', () => {
+  const above = (price: number, target: number) => price >= target;
+  const below = (price: number, target: number) => price <= target;
+
+  assert.equal(above(100, 100), true);
+  assert.equal(below(100, 100), true);
+  assert.equal(above(99.99, 100), false);
+  assert.equal(below(100.01, 100), false);
 });
