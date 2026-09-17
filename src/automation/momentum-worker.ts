@@ -44,7 +44,8 @@ async function insert(table: string, body: Record<string, unknown>): Promise<{ c
   if (response.status === 409) return { created: false };
   if (!response.ok) throw new Error(`Supabase ${table} insert failed: ${response.status}`);
   const rows = await response.json() as Array<{ id?: string }>;
-  return { created: true, id: rows[0]?.id };
+  const id = rows[0]?.id;
+  return id ? { created: true, id } : { created: true };
 }
 
 async function persistCommitteeReport(signalId: string, report: ReturnType<typeof buildCommitteeReport>): Promise<void> {
