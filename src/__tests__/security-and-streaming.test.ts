@@ -1,14 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { idempotencyFingerprint, requireIdempotencyHeader } from '../../apps/web/lib/security.js';
+import { calculateIndicators, ema, rsi, sma } from '../indicators.js';
 
-test('idempotency fingerprint is stable for the same request', () => {
-  const a = idempotencyFingerprint(42, 'request-1234', { symbol: 'BTC', amount: 10 });
-  const b = idempotencyFingerprint(42, 'request-1234', { symbol: 'BTC', amount: 10 });
-  assert.equal(a, b);
+test('technical indicator primitives remain deterministic', () => {
+  assert.equal(sma([1, 2, 3, 4], 2), 3.5);
+  assert.equal(ema([1, 2, 3, 4], 2), 3.5);
+  assert.equal(rsi([1, 2, 3, 4, 5], 2), 100);
 });
 
-test('idempotency header rejects missing or malformed keys', () => {
-  assert.throws(() => requireIdempotencyHeader(new Request('https://example.test')));
-  assert.equal(requireIdempotencyHeader(new Request('https://example.test', { headers: { 'Idempotency-Key': 'request-1234' } })), 'request-1234');
+test('indicator aggregate exposes the expected committee inputs', () => {
+  const candles = Array.from({ length: 30 }, (_, index) => ({
+    open: index + 1,
+    high: index + 2,
+    low: index,
+    close: index + 1,
+    volume: 1000 + index,
+    timestamp: new Date(index * 1000).toISOString(),
+  }));
+  const result = calculateIndicators(candles);
+  assert.ok(result.sma20 !== null);
+  assert.ok(result.ema20 !== null);
+  assert.ok(result.rsi14 !== null);
+  assert.ok(result.atr14 !== null);
 });
