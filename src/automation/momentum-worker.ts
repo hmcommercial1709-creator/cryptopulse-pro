@@ -17,21 +17,45 @@ const headers = () => {
 type Previous = { volume_24h: number; price: number };
 type Subscriber = { user_id: string; symbol: string; cp_users: { telegram_user_id: number | null } | null };
 
+type Signal = {
+  id: string;
+  symbol: string;
+  name: string;
+  price: number;
+  volume_change_pct: number;
+  momentum_score: number;
+  change_24h: number;
+  volume_24h: number;
+  detected_at: string;
+};
+
 async function read<T>(table: string, query: string): Promise<T[]> {
   const response = await fetch(`${base()}/${table}?${query}`, { headers: headers(), cache: 'no-store' });
   if (!response.ok) throw new Error(`Supabase ${table} read failed: ${response.status}`);
   return await response.json() as T[];
 }
 
-async function insert(table: string, body: Record<string, unknown>): Promise<boolean> {
+async function insert(table: string, body: Record<string, unknown>): Promise<{ created: boolean; id?: string }> {
   const response = await fetch(`${base()}/${table}`, {
     method: 'POST',
-    headers: { ...headers(), Prefer: 'return=minimal' },
+    headers: { ...headers(), Prefer: 'return=representation' },
     body: JSON.stringify(body),
   });
-  if (response.status === 409) return false;
+  if (response.status === 409) return { created: false };
   if (!response.ok) throw new Error(`Supabase ${table} insert failed: ${response.status}`);
-  return true;
+  const rows = await response.json() as Array<{ id?: string }>;
+  return { created: true, id: rows[0]?.id };
+}
+
+async function persistCommitteeReport(signalId: string, report: ReturnType<typeof buildCommitteeReport>): Promise<void> {
+  await insert('cp_committee_reports', {
+    signal_id: signalId,
+    symbol: report.symbol,
+    decision: report.decision,
+    confidence: report.confidence,
+    report,
+    generated_at: report.generatedAt,
+  });
 }
 
 function score(volumeSpike: number, change24h: number): number {
@@ -126,7 +150,7 @@ async function cycle(): Promise<void> {
         observedAt: new Date().toISOString(),
       });
       const bucket = Math.floor(Date.now() / 300_000);
-      const created = await insert('cp_momentum_signals', {
+      const signal = await insert('cp_momentum_signals', {
         symbol: market.symbol,
         name: market.symbol,
         price: market.price,
@@ -137,9 +161,10 @@ async function cycle(): Promise<void> {
         share_key: `momentum:${market.symbol}:${bucket}`,
       });
 
-      if (created) {
+      if (signal.created && signal.id) {
+        await persistCommitteeReport(signal.id, committee);
         await sendMomentumAlert(market.symbol, market.price, spike, momentumScore, market.change24h, formatCommitteeReport(committee));
-        console.log(JSON.stringify({ event: 'momentum_signal', symbol: market.symbol, volumeSpikePct: spike, momentumScore, committeeDecision: committee.decision, committeeConfidence: committee.confidence }));
+        console.log(JSON.stringify({ event: 'momentum_signal', symbol: market.symbol, signalId: signal.id, volumeSpikePct: spike, momentumScore, committeeDecision: committee.decision, committeeConfidence: committee.confidence }));
       }
     }
   }
