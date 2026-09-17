@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { config, requireBotToken } from './config.js';
-import { getMarketSnapshot } from './market.js';
+import { getMarketSnapshot, getMarketSnapshots } from './market.js';
 import { buildBeginnerTradePlan, type RiskLevel } from './domain.js';
 import { getLocale, t } from './i18n.js';
 
@@ -71,16 +71,15 @@ export function createBot(): Bot {
     ], { language_code: locale });
   }
 
-  // Telegram-native Inline Mode: users can request live market cards from any chat/group.
   bot.inlineQuery(async (ctx) => {
     const query = ctx.inlineQuery.query.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const symbols = query ? [query] : ['BTC', 'ETH', 'SOL'];
     const locale = getLocale(ctx.from?.language_code);
     const results = [];
 
-    for (const symbol of symbols.slice(0, 5)) {
-      try {
-        const snapshot = await getMarketSnapshot(symbol);
+    try {
+      const snapshots = await getMarketSnapshots(symbols.slice(0, 5));
+      for (const snapshot of snapshots) {
         const direction = snapshot.change24h >= 0 ? '🟢' : '🔴';
         const title = `${direction} ${snapshot.symbol} · $${snapshot.price.toLocaleString()}`;
         const description = `${snapshot.change24h >= 0 ? '+' : ''}${snapshot.change24h.toFixed(2)}% · Vol ${snapshot.volume24h.toLocaleString()}`;
@@ -95,9 +94,9 @@ export function createBot(): Bot {
           input_message_content: { message_text: text },
           reply_markup: { inline_keyboard: [[{ text: locale === 'ar' ? '📊 افتح CryptoPulse' : '📊 Open CryptoPulse', url: config.botUsername ? `https://t.me/${config.botUsername}?start=${snapshot.symbol.toLowerCase()}` : 'https://t.me/']]] },
         });
-      } catch (error) {
-        console.error(`Inline market lookup failed for ${symbol}:`, error);
       }
+    } catch (error) {
+      console.error('Inline market lookup failed:', error);
     }
 
     await ctx.answerInlineQuery(results, { cache_time: 5, is_personal: true });
@@ -130,18 +129,18 @@ export function createBot(): Bot {
 
 async function sendMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
   const x = t(locale);
-  const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
+  const [btc, eth, sol] = await getMarketSnapshots(['BTC', 'ETH', 'SOL']);
   await ctx.reply(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)\nETH: $${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)\nSOL: $${sol.price.toLocaleString()} (${sol.change24h.toFixed(2)}%)\n\n${x.liveReady}`, { reply_markup: nav(locale) });
 }
 
 async function editMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
   const x = t(locale);
-  const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
+  const [btc, eth, sol] = await getMarketSnapshots(['BTC', 'ETH', 'SOL']);
   await ctx.editMessageText(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)\nETH: $${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)\nSOL: $${sol.price.toLocaleString()} (${sol.change24h.toFixed(2)}%)\n\n${x.liveReady}`, { reply_markup: nav(locale) });
 }
 
 async function showSignals(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
-  const [btc, eth, sol] = await Promise.all([getMarketSnapshot('BTC'), getMarketSnapshot('ETH'), getMarketSnapshot('SOL')]);
+  const [btc, eth, sol] = await getMarketSnapshots(['BTC', 'ETH', 'SOL']);
   const text = locale === 'ar'
     ? `⚡ إشارات السوق المباشرة\n\nBTC ${btc.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${btc.change24h.toFixed(2)}%\nETH ${eth.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${eth.change24h.toFixed(2)}%\nSOL ${sol.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${sol.change24h.toFixed(2)}%`
     : `⚡ Live Market Signals\n\nBTC ${btc.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${btc.change24h.toFixed(2)}%\nETH ${eth.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${eth.change24h.toFixed(2)}%\nSOL ${sol.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${sol.change24h.toFixed(2)}%`;
