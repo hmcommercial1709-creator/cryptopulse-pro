@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { buildCommitteeReport } from '../agents/committee.js';
+import { formatCommitteeReport } from '../agents/committee-format.js';
 import { getMarketSnapshots } from '../market.js';
 
 const env = (name: string): string => {
@@ -38,7 +40,7 @@ function score(volumeSpike: number, change24h: number): number {
   return Math.round((volumeComponent + momentumComponent) * 10) / 10;
 }
 
-async function sendMomentumAlert(symbol: string, price: number, volumeSpike: number, momentumScore: number, change24h: number): Promise<void> {
+async function sendMomentumAlert(symbol: string, price: number, volumeSpike: number, momentumScore: number, change24h: number, committeeText?: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.warn('momentum-alerts-disabled: TELEGRAM_BOT_TOKEN is not configured');
@@ -52,7 +54,14 @@ async function sendMomentumAlert(symbol: string, price: number, volumeSpike: num
 
   const username = process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, '');
   const miniAppUrl = username ? `https://t.me/${username}?startapp=momentum_${encodeURIComponent(symbol)}` : undefined;
-  const text = `⚡ CryptoPulse Momentum Alert\n\n${symbol}\nPrice: $${price.toLocaleString()}\n24h: ${change24h >= 0 ? '+' : ''}${change24h.toFixed(2)}%\nVolume change: +${volumeSpike.toFixed(1)}%\nMomentum score: ${momentumScore.toFixed(1)}`;
+  const text = [
+    `⚡ CryptoPulse Momentum Alert\n\n${symbol}`,
+    `Price: $${price.toLocaleString()}`,
+    `24h: ${change24h >= 0 ? '+' : ''}${change24h.toFixed(2)}%`,
+    `Volume change: +${volumeSpike.toFixed(1)}%`,
+    `Momentum score: ${momentumScore.toFixed(1)}`,
+    committeeText ? `\n${committeeText}` : '',
+  ].filter(Boolean).join('\n');
 
   let sent = 0;
   for (const subscriber of subscribers) {
@@ -107,6 +116,15 @@ async function cycle(): Promise<void> {
       spike >= Number(process.env.MOMENTUM_VOLUME_SPIKE_PCT ?? 100) &&
       momentumScore >= Number(process.env.MOMENTUM_MIN_SCORE ?? 35)
     ) {
+      const committee = buildCommitteeReport({
+        symbol: market.symbol,
+        price: market.price,
+        change24h: market.change24h,
+        volume24h: market.volume24h,
+        volumeSpikePct: spike,
+        momentumScore,
+        observedAt: new Date().toISOString(),
+      });
       const bucket = Math.floor(Date.now() / 300_000);
       const created = await insert('cp_momentum_signals', {
         symbol: market.symbol,
@@ -120,8 +138,8 @@ async function cycle(): Promise<void> {
       });
 
       if (created) {
-        await sendMomentumAlert(market.symbol, market.price, spike, momentumScore, market.change24h);
-        console.log(JSON.stringify({ event: 'momentum_signal', symbol: market.symbol, volumeSpikePct: spike, momentumScore }));
+        await sendMomentumAlert(market.symbol, market.price, spike, momentumScore, market.change24h, formatCommitteeReport(committee));
+        console.log(JSON.stringify({ event: 'momentum_signal', symbol: market.symbol, volumeSpikePct: spike, momentumScore, committeeDecision: committee.decision, committeeConfidence: committee.confidence }));
       }
     }
   }
