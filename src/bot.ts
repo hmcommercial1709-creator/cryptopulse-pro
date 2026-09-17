@@ -10,8 +10,9 @@ function menu(locale: 'en' | 'ar'): InlineKeyboard {
     .text(x.markets, 'markets').text('⚡ Signals', 'signals').row()
     .text(x.trade, 'trade').text('🤖 Auto Trade', 'auto').row()
     .text(x.alerts, 'alerts').text('💼 Portfolio', 'portfolio').row()
-    .text('🧮 Risk Tool', 'risk-tool').text(x.learn, 'learn').row()
-    .text(x.pro, 'pro').text(x.help, 'help');
+    .text('🧮 Risk Tool', 'risk-tool').text('👥 Referral', 'referral').row()
+    .text(x.learn, 'learn').text(x.pro, 'pro').row()
+    .text(x.help, 'help');
 }
 
 function riskMenu(locale: 'en' | 'ar'): InlineKeyboard {
@@ -26,8 +27,20 @@ function nav(locale: 'en' | 'ar'): InlineKeyboard {
     const shareText = encodeURIComponent(locale === 'ar' ? 'جرّب CryptoPulse لتحليل سوق العملات الرقمية مباشرة داخل Telegram.' : 'Try CryptoPulse for live crypto market intelligence inside Telegram.');
     const shareUrl = encodeURIComponent(`https://t.me/${config.botUsername}?start=market`);
     keyboard.row().url(locale === 'ar' ? '📤 مشاركة CryptoPulse' : '📤 Share CryptoPulse', `https://t.me/share/url?url=${shareUrl}&text=${shareText}`);
+    keyboard.row().text(locale === 'ar' ? '👥 رابط الدعوة' : '👥 Referral', 'referral');
   }
   return keyboard;
+}
+
+function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  if (config.botUsername) {
+    const referralUrl = `https://t.me/${config.botUsername}?startapp=ref_${userId}`;
+    const text = locale === 'ar' ? '📤 مشاركة رابط الدعوة' : '📤 Share referral link';
+    const shareText = encodeURIComponent(locale === 'ar' ? 'انضم إلى CryptoPulse لمتابعة السوق والتحليلات داخل Telegram.' : 'Join CryptoPulse for live crypto market intelligence inside Telegram.');
+    keyboard.url(text, `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${shareText}`);
+  }
+  return keyboard.row().text(locale === 'ar' ? '⬅️ الرئيسية' : '⬅️ Home', 'home');
 }
 
 function inlineResultId(symbol: string, kind: string): string {
@@ -60,6 +73,7 @@ export function createBot(): Bot {
     const locale = getLocale(ctx.from?.language_code);
     await ctx.reply(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) });
   });
+  bot.command('referral', async (ctx) => showReferral(ctx, getLocale(ctx.from?.language_code)));
 
   for (const locale of ['en', 'ar'] as const) {
     const x = t(locale);
@@ -70,6 +84,7 @@ export function createBot(): Bot {
       { command: 'trade', description: locale === 'ar' ? 'خطة تداول' : 'Trading plan' },
       { command: 'auto', description: locale === 'ar' ? 'التداول الآلي' : 'Automated trading' },
       { command: 'portfolio', description: locale === 'ar' ? 'المحفظة' : 'Portfolio' },
+      { command: 'referral', description: locale === 'ar' ? 'رابط الدعوة والإحالات' : 'Referral link and invites' },
       { command: 'alerts', description: locale === 'ar' ? 'تنبيهات العملات' : 'Crypto alerts' },
       { command: 'learn', description: locale === 'ar' ? 'تعلم التداول' : 'Learn crypto trading' },
       { command: 'help', description: x.help.replace(/^[^ ]+ /, '') },
@@ -111,9 +126,15 @@ export function createBot(): Bot {
   bot.callbackQuery('signals', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showSignals(ctx, locale, true); });
   bot.callbackQuery('auto', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showAuto(ctx, locale, true); });
   bot.callbackQuery('portfolio', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) }); });
+  bot.callbackQuery('referral', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showReferral(ctx, locale, true); });
   bot.callbackQuery('risk-tool', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '🧮 حاسبة الصفقة\n\nاختر مستوى المخاطرة لإنشاء خطة مبنية على سعر BTC المباشر.' : '🧮 Trade Calculator\n\nChoose a risk level to generate a plan using the live BTC price.', { reply_markup: riskMenu(locale) }); });
   bot.callbackQuery('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
 
+  bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).learnText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).alertsText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).proText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).helpText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).start, { reply_markup: menu(locale) }); });
   bot.on('callback_query:data', async (ctx) => {
     const match = /^risk:(low|medium|high)$/.exec(ctx.callbackQuery.data);
     if (!match) return;
@@ -127,13 +148,22 @@ export function createBot(): Bot {
     await ctx.editMessageText(`${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: $${plan.entry.toLocaleString()}\n${x.stop}: $${plan.stopLoss.toFixed(2)}\n${x.target}: $${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1`, { reply_markup: new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home') });
   });
 
-  bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).learnText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).alertsText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).proText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).helpText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).start, { reply_markup: menu(locale) }); });
   bot.catch((error) => console.error('CryptoPulse bot error:', error.error));
   return bot;
+}
+
+async function showReferral(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  const userId = Number(ctx.from?.id);
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !config.botUsername) {
+    const text = locale === 'ar' ? '👥 رابط الدعوة غير متاح حالياً.' : '👥 Referral link is not available right now.';
+    if (edit) await ctx.editMessageText(text, { reply_markup: nav(locale) }); else await ctx.reply(text, { reply_markup: nav(locale) });
+    return;
+  }
+  const referralUrl = `https://t.me/${config.botUsername}?startapp=ref_${userId}`;
+  const text = locale === 'ar'
+    ? `👥 مركز الدعوة\n\nشارك هذا الرابط لدعوة مستخدمين جدد إلى CryptoPulse:\n\n${referralUrl}\n\nسيتم تسجيل الإحالة عندما يفتح المستخدم الجديد Mini App عبر رابط الدعوة.`
+    : `👥 Referral Center\n\nShare this link to invite new CryptoPulse users:\n\n${referralUrl}\n\nThe referral is recorded when the new user opens the Mini App through this link.`;
+  if (edit) await ctx.editMessageText(text, { reply_markup: referralMenu(locale, userId) }); else await ctx.reply(text, { reply_markup: referralMenu(locale, userId) });
 }
 
 async function sendMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
