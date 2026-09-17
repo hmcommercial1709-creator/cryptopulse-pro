@@ -26,10 +26,9 @@ async function recordReferral(startParam: string, referredTelegramId: number): P
   const referrerTelegramId = referralTelegramId(startParam);
   if (!referrerTelegramId || referrerTelegramId === referredTelegramId) return false;
 
-  const [referrerRows, referredRows, existingRows] = await Promise.all([
+  const [referrerRows, referredRows] = await Promise.all([
     supabaseSelect('cp_users', `telegram_user_id=eq.${referrerTelegramId}&select=id&limit=1`),
     supabaseSelect('cp_users', `telegram_user_id=eq.${referredTelegramId}&select=id&limit=1`),
-    supabaseSelect('cp_referrals', `referred_user_id=eq.${encodeURIComponent('')}&select=id&limit=0`).catch(() => []),
   ]);
 
   const referrerId = typeof referrerRows[0]?.id === 'string' ? referrerRows[0].id : null;
