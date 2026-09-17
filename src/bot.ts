@@ -34,6 +34,11 @@ function inlineResultId(symbol: string, kind: string): string {
   return `${kind}:${symbol.toUpperCase()}`;
 }
 
+function requireThreeSnapshots(snapshots: Awaited<ReturnType<typeof getMarketSnapshots>>): [typeof snapshots[number], typeof snapshots[number], typeof snapshots[number]] {
+  if (snapshots.length < 3) throw new Error('Expected three market snapshots.');
+  return [snapshots[0]!, snapshots[1]!, snapshots[2]!];
+}
+
 export function createBot(): Bot {
   const bot = new Bot(requireBotToken());
 
@@ -108,16 +113,20 @@ export function createBot(): Bot {
   bot.callbackQuery('portfolio', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) }); });
   bot.callbackQuery('risk-tool', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '🧮 حاسبة الصفقة\n\nاختر مستوى المخاطرة لإنشاء خطة مبنية على سعر BTC المباشر.' : '🧮 Trade Calculator\n\nChoose a risk level to generate a plan using the live BTC price.', { reply_markup: riskMenu(locale) }); });
   bot.callbackQuery('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
-  bot.callbackQuery(/^risk:(low|medium|high)$/, async (ctx) => {
+
+  bot.on('callback_query:data', async (ctx) => {
+    const match = /^risk:(low|medium|high)$/.exec(ctx.callbackQuery.data);
+    if (!match) return;
     const locale = getLocale(ctx.from?.language_code);
     const x = t(locale);
     await ctx.answerCallbackQuery();
-    const risk = ctx.match[1] as RiskLevel;
+    const risk = match[1] as RiskLevel;
     const snapshot = await getMarketSnapshot('BTC');
     const plan = buildBeginnerTradePlan(snapshot, risk);
     const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
     await ctx.editMessageText(`${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: $${plan.entry.toLocaleString()}\n${x.stop}: $${plan.stopLoss.toFixed(2)}\n${x.target}: $${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1`, { reply_markup: new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home') });
   });
+
   bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).learnText, { reply_markup: nav(locale) }); });
   bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).alertsText, { reply_markup: nav(locale) }); });
   bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).proText, { reply_markup: nav(locale) }); });
@@ -129,18 +138,18 @@ export function createBot(): Bot {
 
 async function sendMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
   const x = t(locale);
-  const [btc, eth, sol] = await getMarketSnapshots(['BTC', 'ETH', 'SOL']);
+  const [btc, eth, sol] = requireThreeSnapshots(await getMarketSnapshots(['BTC', 'ETH', 'SOL']));
   await ctx.reply(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)\nETH: $${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)\nSOL: $${sol.price.toLocaleString()} (${sol.change24h.toFixed(2)}%)\n\n${x.liveReady}`, { reply_markup: nav(locale) });
 }
 
 async function editMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
   const x = t(locale);
-  const [btc, eth, sol] = await getMarketSnapshots(['BTC', 'ETH', 'SOL']);
+  const [btc, eth, sol] = requireThreeSnapshots(await getMarketSnapshots(['BTC', 'ETH', 'SOL']));
   await ctx.editMessageText(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)\nETH: $${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)\nSOL: $${sol.price.toLocaleString()} (${sol.change24h.toFixed(2)}%)\n\n${x.liveReady}`, { reply_markup: nav(locale) });
 }
 
 async function showSignals(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
-  const [btc, eth, sol] = await getMarketSnapshots(['BTC', 'ETH', 'SOL']);
+  const [btc, eth, sol] = requireThreeSnapshots(await getMarketSnapshots(['BTC', 'ETH', 'SOL']));
   const text = locale === 'ar'
     ? `⚡ إشارات السوق المباشرة\n\nBTC ${btc.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${btc.change24h.toFixed(2)}%\nETH ${eth.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${eth.change24h.toFixed(2)}%\nSOL ${sol.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${sol.change24h.toFixed(2)}%`
     : `⚡ Live Market Signals\n\nBTC ${btc.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${btc.change24h.toFixed(2)}%\nETH ${eth.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${eth.change24h.toFixed(2)}%\nSOL ${sol.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${sol.change24h.toFixed(2)}%`;
