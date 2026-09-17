@@ -1,43 +1,71 @@
 import type { MarketSnapshot } from './domain.js';
+import { config } from './config.js';
 
-const BINANCE_MARKET_URL = 'https://data-api.binance.vision/api/v3/ticker/24hr';
+const CMC_QUOTES_URL = 'https://pro-api.coinmarketcap.com/v3/cryptocurrency/quotes/latest';
 
-const symbolMap: Record<string, string> = {
-  BTC: 'BTCUSDT',
-  ETH: 'ETHUSDT',
-  SOL: 'SOLUSDT',
+// Stable CoinMarketCap IDs for the core assets. Unknown assets fall back to symbol lookup.
+const coinIds: Record<string, number> = {
+  BTC: 1,
+  ETH: 1027,
+  SOL: 5426,
 };
 
-interface BinanceTicker {
+interface CmcQuote {
+  id: number;
+  name: string;
   symbol: string;
-  lastPrice: string;
-  priceChangePercent: string;
-  volume: string;
-  closeTime: number;
+  quote?: {
+    USD?: {
+      price?: number;
+      volume_24h?: number;
+      percent_change_24h?: number;
+      last_updated?: string;
+    };
+  };
+}
+
+interface CmcResponse {
+  data?: Record<string, CmcQuote>;
+  status?: { error_code?: number; error_message?: string };
 }
 
 export async function getMarketSnapshot(symbol: string): Promise<MarketSnapshot> {
   const normalized = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const pair = symbolMap[normalized] ?? `${normalized}USDT`;
-  const url = `${BINANCE_MARKET_URL}?symbol=${encodeURIComponent(pair)}`;
+  if (!normalized) throw new Error('Invalid market symbol');
 
-  const response = await fetch(url, { headers: { accept: 'application/json' } });
+  const params = new URLSearchParams({ convert: 'USD' });
+  const id = coinIds[normalized];
+  if (id) params.set('id', String(id));
+  else params.set('symbol', normalized);
+
+  const headers: Record<string, string> = { accept: 'application/json' };
+  if (config.marketApiKey) headers['X-CMC_PRO_API_KEY'] = config.marketApiKey;
+
+  const response = await fetch(`${CMC_QUOTES_URL}?${params.toString()}`, { headers });
   if (!response.ok) {
-    throw new Error(`Binance market data request failed: HTTP ${response.status}`);
+    throw new Error(`CoinMarketCap market data request failed: HTTP ${response.status}`);
   }
 
-  const ticker = (await response.json()) as BinanceTicker;
-  const price = Number(ticker.lastPrice);
-  const change24h = Number(ticker.priceChangePercent);
-  const volume24h = Number(ticker.volume);
+  const payload = (await response.json()) as CmcResponse;
+  if (payload.status?.error_code) {
+    throw new Error(`CoinMarketCap API error ${payload.status.error_code}: ${payload.status.error_message ?? 'Unknown error'}`);
+  }
 
-  if (!Number.isFinite(price)) throw new Error(`Invalid Binance price for ${pair}`);
+  const quote = Object.values(payload.data ?? {})[0];
+  const usd = quote?.quote?.USD;
+  const price = Number(usd?.price);
+  const change24h = Number(usd?.percent_change_24h);
+  const volume24h = Number(usd?.volume_24h);
+
+  if (!Number.isFinite(price)) {
+    throw new Error(`CoinMarketCap returned no valid USD price for ${normalized}`);
+  }
 
   return {
-    symbol: normalized,
+    symbol: quote?.symbol ?? normalized,
     price,
     change24h: Number.isFinite(change24h) ? change24h : 0,
     volume24h: Number.isFinite(volume24h) ? volume24h : 0,
-    updatedAt: new Date(ticker.closeTime || Date.now()).toISOString(),
+    updatedAt: usd?.last_updated ?? new Date().toISOString(),
   };
 }
