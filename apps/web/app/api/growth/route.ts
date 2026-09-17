@@ -4,7 +4,7 @@ import { supabaseInsert } from '../../../lib/supabase-admin';
 
 const ALLOWED_EVENTS = new Set([
   'mini_open', 'market_view', 'watchlist_add', 'watchlist_remove', 'alert_create', 'alert_remove',
-  'share_open', 'share_click', 'referral_open', 'activation', 'first_share', 'pro_view',
+  'share_open', 'share_click', 'referral_open', 'activation', 'first_share', 'pro_view', 'agent_intent',
 ]);
 
 export async function POST(request: NextRequest) {
