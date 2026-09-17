@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { jsonError, requireTelegramUser } from '../../../lib/mini-auth';
-import { supabaseInsert, supabaseSelect } from '../../../lib/supabase-admin';
+import { supabaseInsert, supabaseSelect, supabaseUpsert } from '../../../lib/supabase-admin';
 
 const ALLOWED_EVENTS = new Set([
   'mini_open', 'market_view', 'watchlist_add', 'watchlist_remove', 'alert_create', 'alert_remove',
@@ -35,15 +35,28 @@ async function recordReferral(startParam: string, referredTelegramId: number): P
   const referredId = typeof referredRows[0]?.id === 'string' ? referredRows[0].id : null;
   if (!referrerId || !referredId || referrerId === referredId) return false;
 
-  const alreadyReferred = await supabaseSelect('cp_referrals', `referred_user_id=eq.${referredId}&select=id&limit=1`);
-  if (alreadyReferred.length) return false;
-
-  await supabaseInsert('cp_referrals', {
+  const rows = await supabaseUpsert('cp_referrals', {
     referrer_user_id: referrerId,
     referred_user_id: referredId,
     source: 'telegram_startapp',
-  });
-  return true;
+  }, 'referred_user_id');
+  return rows.length > 0;
+}
+
+async function recordGrowthEvent(userId: number, event: string, source: string | null, metadata: Record<string, unknown>): Promise<boolean> {
+  try {
+    await supabaseInsert('cp_growth_events', {
+      telegram_user_id: userId,
+      event,
+      source,
+      metadata,
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if ((event === 'activation' || event === 'first_share') && message.includes('409')) return false;
+    throw error;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -67,13 +80,8 @@ export async function POST(request: NextRequest) {
       referralRecorded = await recordReferral(startParam, user.id);
     }
 
-    await supabaseInsert('cp_growth_events', {
-      telegram_user_id: user.id,
-      event,
-      source,
-      metadata: referralRecorded ? { ...storedMetadata, referralRecorded: true } : storedMetadata,
-    });
-    return Response.json({ ok: true, referralRecorded });
+    const eventRecorded = await recordGrowthEvent(user.id, event, source, referralRecorded ? { ...storedMetadata, referralRecorded: true } : storedMetadata);
+    return Response.json({ ok: true, referralRecorded, eventRecorded });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Unable to record event.', 400);
   }
