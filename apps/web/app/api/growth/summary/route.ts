@@ -7,11 +7,14 @@ function dayKey(value: string): string { return new Date(value).toISOString().sl
 export async function GET(request: NextRequest): Promise<Response> {
   try {
     const user = requireTelegramUser(request);
-    const userId = user.id;
-    const [referralRows, eventRows] = await Promise.all([
-      supabaseSelect('cp_referrals', `select=referred_user_id,created_at&referrer_user_id=eq.${encodeURIComponent(String(userId))}&order=created_at.asc`),
-      supabaseSelect('cp_growth_events', `select=event,created_at,metadata&telegram_user_id=eq.${encodeURIComponent(String(userId))}&order=created_at.asc&limit=5000`),
+    const [userRows, eventRows] = await Promise.all([
+      supabaseSelect('cp_users', `select=id&telegram_user_id=eq.${encodeURIComponent(String(user.id))}&limit=1`),
+      supabaseSelect('cp_growth_events', `select=event,created_at,metadata&telegram_user_id=eq.${encodeURIComponent(String(user.id))}&order=created_at.asc&limit=5000`),
     ]);
+    const userUuid = typeof userRows[0]?.id === 'string' ? userRows[0].id : null;
+    const referralRows = userUuid
+      ? await supabaseSelect('cp_referrals', `select=referred_user_id,created_at&referrer_user_id=eq.${encodeURIComponent(userUuid)}&order=created_at.asc`)
+      : [];
 
     const firstEvent = eventRows.find((row) => typeof row.created_at === 'string');
     const firstAt = typeof firstEvent?.created_at === 'string' ? new Date(firstEvent.created_at) : null;
@@ -33,10 +36,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       referrals: referralRows.length,
       activated,
       firstShared,
-      retention: {
-        d1: d1Eligible ? hasEventOnDay(1) : null,
-        d7: d7Eligible ? hasEventOnDay(7) : null,
-      },
+      retention: { d1: d1Eligible ? hasEventOnDay(1) : null, d7: d7Eligible ? hasEventOnDay(7) : null },
       firstActivityAt: firstAt?.toISOString() ?? null,
       asOf: new Date().toISOString(),
     }, { headers: { 'Cache-Control': 'no-store' } });
