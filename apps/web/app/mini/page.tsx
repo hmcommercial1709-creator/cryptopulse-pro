@@ -9,7 +9,7 @@ type AlertItem = { id: string; symbol: string; condition: 'above' | 'below' | 'c
 type Tab = 'home' | 'trade' | 'intelligence' | 'watchlist' | 'alerts' | 'auto' | 'portfolio';
 
 declare global {
-  interface Window { Telegram?: { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void } } }
+  interface Window { Telegram?: { WebApp?: { initData?: string; initDataUnsafe?: { start_param?: string }; openTelegramLink?: (url: string) => void } } }
 }
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
@@ -76,6 +76,28 @@ export default function MiniTradingTerminal() {
     void loadMarkets();
     void loadUserData();
     void track('mini_open');
+
+    // Attribution is deliberately fail-soft and runs after the Mini App has mounted.
+    // Telegram documents startapp -> start_param/tgWebAppStartParam and requires initData
+    // to be validated server-side; /api/growth performs that validation before storing it.
+    try {
+      const startParam = (window.Telegram?.WebApp?.initDataUnsafe?.start_param
+        ?? new URLSearchParams(window.location.search).get('tgWebAppStartParam')
+        ?? '').trim().slice(0, 64);
+      const initData = window.Telegram?.WebApp?.initData ?? '';
+      if (startParam && initData) {
+        const key = `cryptopulse:startapp:${startParam}`;
+        if (!window.sessionStorage.getItem(key)) {
+          window.sessionStorage.setItem(key, '1');
+          void fetch('/api/growth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': initData },
+            body: JSON.stringify({ event: 'startapp_open', metadata: { startParam } }),
+          }).catch(() => undefined);
+        }
+      }
+    } catch { /* attribution must never affect Mini App availability */ }
+
     const timer = window.setInterval(() => void loadMarkets(), 45_000);
     return () => window.clearInterval(timer);
   }, [loadMarkets, loadUserData, track]);
