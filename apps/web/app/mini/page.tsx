@@ -6,7 +6,7 @@ type Market = { symbol: string; price: number; change24h: number; volume24h: num
 type MarketsResponse = { source: string; updatedAt: string; markets: Market[]; error?: string };
 type WatchItem = { id: string; symbol: string; created_at: string };
 type AlertItem = { id: string; symbol: string; condition: 'above' | 'below' | 'change24h'; threshold: number; active: boolean; created_at: string };
-type Tab = 'home' | 'trade' | 'intelligence' | 'watchlist' | 'alerts' | 'auto' | 'portfolio';
+type Tab = 'home' | 'trade' | 'intelligence' | 'watchlist' | 'alerts' | 'auto' | 'portfolio' | 'referral';
 
 declare global {
   interface Window { Telegram?: { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void } } }
@@ -79,6 +79,7 @@ export default function MiniTradingTerminal() {
     try {
       const startParam = (new URLSearchParams(window.location.search).get('tgWebAppStartParam') ?? '').trim().slice(0, 64);
       const initData = window.Telegram?.WebApp?.initData ?? '';
+      if (startParam.startsWith('ref_')) setTab('referral');
       if (startParam && initData) {
         const key = `cryptopulse:startapp:${startParam}`;
         if (!window.sessionStorage.getItem(key)) {
@@ -147,7 +148,8 @@ export default function MiniTradingTerminal() {
         {tab === 'alerts' && <div style={cardStyle}><h2>🔔 Price Alerts</h2><div style={{ display: 'grid', gap: 8 }}><select value={alertSymbol} onChange={e => setAlertSymbol(e.target.value)} style={inputStyle}>{markets.map(m => <option key={m.symbol}>{m.symbol}</option>)}</select><select value={alertCondition} onChange={e => setAlertCondition(e.target.value as typeof alertCondition)} style={inputStyle}><option value="above">Price above</option><option value="below">Price below</option><option value="change24h">24h change reaches</option></select><input value={alertThreshold} onChange={e => setAlertThreshold(e.target.value)} inputMode="decimal" placeholder={alertCondition === 'change24h' ? 'e.g. 5 or -5' : 'Target price'} style={inputStyle} /><button onClick={() => void createAlert()} style={buttonStyle} disabled={busy}>Create Alert</button></div><div style={{ marginTop: 18 }}>{alerts.map(a => <div key={a.id} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', gap: 8 }}><div><strong>{a.symbol}</strong><div style={{ opacity: .65 }}>{a.condition === 'above' ? 'Above' : a.condition === 'below' ? 'Below' : '24h change'} · {a.threshold}</div></div><button onClick={() => void removeAlert(a.id)} style={smallButtonStyle} disabled={busy}>Remove</button></div>)}</div></div>}
         {tab === 'auto' && <div style={cardStyle}><h2>🤖 Automation</h2><p style={{ opacity: .7 }}>Strategy monitoring and order execution remain disabled until exchange connection, position sizing, balance checks, price guards and audit trails are fully wired.</p><div style={{ padding: 12, borderRadius: 12, background: '#0b111d', opacity: .8 }}>Status: <strong>Not enabled</strong></div></div>}
         {tab === 'portfolio' && <div style={cardStyle}><h2>💼 Portfolio</h2><p style={{ opacity: .65 }}>No exchange account is connected to this Mini App. Portfolio balances and positions will appear here after secure server-side account integration is implemented.</p></div>}
-        <nav style={{ position: 'sticky', bottom: 0, marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, background: '#0d1320', padding: 8, borderRadius: 16 }}>{([['home','⌂'],['trade','⚡'],['intelligence','📊'],['watchlist','⭐'],['alerts','🔔'],['auto','🤖'],['portfolio','💼']] as const).map(([id,label]) => <button key={id} onClick={() => setTab(id)} style={{ ...smallButtonStyle, opacity: tab === id ? 1 : .55 }}>{label}</button>)}</nav>
+        {tab === 'referral' && <div style={cardStyle}><h2>👥 Referral Center</h2><p style={{ opacity: .7 }}>Invite new users through Telegram and track real server-side referral activity.</p><button onClick={() => { window.location.href = '/mini/referral'; void track('referral_open'); }} style={buttonStyle}>Open Referral Center</button><div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Referral attribution uses Telegram <code>startapp=ref_…</code> links and is recorded when the invited user opens the Mini App.</div></div>}
+        <nav style={{ position: 'sticky', bottom: 0, marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 5, background: '#0d1320', padding: 8, borderRadius: 16, overflowX: 'auto' }}>{([['home','⌂'],['trade','⚡'],['intelligence','📊'],['watchlist','⭐'],['alerts','🔔'],['auto','🤖'],['portfolio','💼'],['referral','👥']] as const).map(([id,label]) => <button key={id} onClick={() => setTab(id)} style={{ ...smallButtonStyle, opacity: tab === id ? 1 : .55, minWidth: 48 }}>{label}</button>)}</nav>
       </section>
     </main>
   );
