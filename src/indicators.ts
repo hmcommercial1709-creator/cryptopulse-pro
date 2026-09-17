@@ -35,7 +35,9 @@ export function ema(values: number[], period: number): number | null {
   let result = average(values.slice(0, period));
   if (result === null) return null;
   for (let index = period; index < values.length; index += 1) {
-    result = (values[index] - result) * multiplier + result;
+    const value = values[index];
+    if (value === undefined) return null;
+    result = (value - result) * multiplier + result;
   }
   return result;
 }
@@ -45,14 +47,20 @@ export function rsi(values: number[], period = 14): number | null {
   let gains = 0;
   let losses = 0;
   for (let index = 1; index <= period; index += 1) {
-    const delta = values[index] - values[index - 1];
+    const current = values[index];
+    const previous = values[index - 1];
+    if (current === undefined || previous === undefined) return null;
+    const delta = current - previous;
     if (delta >= 0) gains += delta;
     else losses -= delta;
   }
   let averageGain = gains / period;
   let averageLoss = losses / period;
   for (let index = period + 1; index < values.length; index += 1) {
-    const delta = values[index] - values[index - 1];
+    const current = values[index];
+    const previous = values[index - 1];
+    if (current === undefined || previous === undefined) return null;
+    const delta = current - previous;
     const gain = Math.max(delta, 0);
     const loss = Math.max(-delta, 0);
     averageGain = ((averageGain * (period - 1)) + gain) / period;
@@ -69,6 +77,7 @@ export function atr(candles: Candle[], period = 14): number | null {
   for (let index = 1; index < candles.length; index += 1) {
     const current = candles[index];
     const previous = candles[index - 1];
+    if (current === undefined || previous === undefined) return null;
     trueRanges.push(Math.max(current.high - current.low, Math.abs(current.high - previous.close), Math.abs(current.low - previous.close)));
   }
   return sma(trueRanges, period);
@@ -79,7 +88,10 @@ export function volatility(values: number[], period = 20): number | null {
   const window = values.slice(-period);
   const returns: number[] = [];
   for (let index = 1; index < window.length; index += 1) {
-    if (window[index - 1] > 0) returns.push(Math.log(window[index] / window[index - 1]));
+    const current = window[index];
+    const previous = window[index - 1];
+    if (current === undefined || previous === undefined) return null;
+    if (previous > 0 && current > 0) returns.push(Math.log(current / previous));
   }
   if (returns.length < 2) return null;
   const mean = average(returns) ?? 0;
