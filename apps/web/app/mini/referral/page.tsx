@@ -11,6 +11,7 @@ export default function ReferralPage(): JSX.Element {
 
   useEffect(() => {
     const headers = { 'x-telegram-init-data': window.Telegram?.WebApp?.initData ?? '' };
+    void fetch('/api/growth', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'referral_open', metadata: { surface: 'mini_referral' } }) }).catch(() => undefined);
     void Promise.all([
       fetch('/api/referral', { headers }).then((r) => r.json() as Promise<{ url?: string }>),
       fetch('/api/referral/stats', { headers }).then((r) => r.json() as Promise<Stats>),
@@ -41,6 +42,7 @@ export default function ReferralPage(): JSX.Element {
   return (
     <main style={{ minHeight: '100vh', background: '#070b14', color: '#f7f9fc', fontFamily: 'system-ui, sans-serif', padding: 16 }}>
       <section style={{ maxWidth: 620, margin: '0 auto' }}>
+        <button onClick={() => { window.location.href = '/mini'; }} style={buttonBack}>← Back to CryptoPulse</button>
         <h1>🚀 CryptoPulse Growth</h1>
         <p style={{ opacity: .65 }}>Invite people directly through Telegram and track real activations.</p>
         <div style={card}><strong>Your referral link</strong><div style={linkBox}>{url || 'Loading…'}</div><div style={grid}><button onClick={() => void copy()} style={button}>Copy link</button><button onClick={share} style={button}>📤 Share on Telegram</button></div></div>
@@ -60,4 +62,5 @@ const card: React.CSSProperties = { background: '#101827', border: '1px solid #1
 const linkBox: React.CSSProperties = { marginTop: 10, padding: 12, borderRadius: 10, background: '#0b111d', overflowWrap: 'anywhere', opacity: .8, fontSize: 13 };
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 };
 const button: React.CSSProperties = { border: 0, borderRadius: 10, padding: 11, background: '#1769e0', color: 'white', fontWeight: 700, cursor: 'pointer' };
+const buttonBack: React.CSSProperties = { border: 0, borderRadius: 10, padding: 10, background: '#1a2332', color: 'white', cursor: 'pointer', marginBottom: 12 };
 const muted: React.CSSProperties = { opacity: .55, fontSize: 12, marginTop: 4 };
