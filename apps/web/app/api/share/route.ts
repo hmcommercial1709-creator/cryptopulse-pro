@@ -2,13 +2,15 @@ import { NextRequest } from 'next/server';
 import { jsonError, normalizeSymbol, requireTelegramUser } from '../../../lib/mini-auth';
 import { supabaseInsert, supabaseUpsert } from '../../../lib/supabase-admin';
 
+type SharePayload = Record<string, unknown>;
+
 export async function POST(request: NextRequest) {
   try {
     const user = requireTelegramUser(request);
     const body = await request.json() as { symbol?: unknown; cardType?: unknown; payload?: unknown };
     const symbol = normalizeSymbol(body.symbol);
     const cardType = typeof body.cardType === 'string' && /^[a-z0-9_-]{2,40}$/i.test(body.cardType) ? body.cardType : 'market';
-    const payload = body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload) ? body.payload : {};
+    const payload: SharePayload = body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload) ? body.payload as SharePayload : {};
     const users = await supabaseUpsert('cp_users', {
       telegram_user_id: user.id,
       username: user.username ?? null,
@@ -22,7 +24,8 @@ export async function POST(request: NextRequest) {
     const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? '';
     if (typeof id !== 'string' || !botUsername) throw new Error('Telegram share configuration is incomplete.');
     const startUrl = `https://t.me/${botUsername}?start=share_${id}`;
-    const text = typeof payload.text === 'string' ? payload.text.slice(0, 700) : `CryptoPulse ${symbol} market snapshot`;
+    const rawText = payload.text;
+    const text = typeof rawText === 'string' ? rawText.slice(0, 700) : `CryptoPulse ${symbol} market snapshot`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(startUrl)}&text=${encodeURIComponent(text)}`;
     return Response.json({ id, startUrl, shareUrl });
   } catch (error) {
