@@ -10,7 +10,7 @@ function menu(locale: 'en' | 'ar'): InlineKeyboard {
     .text(x.markets, 'markets').text('⚡ Signals', 'signals').row()
     .text(x.trade, 'trade').text('🤖 Auto Trade', 'auto').row()
     .text(x.alerts, 'alerts').text('💼 Portfolio', 'portfolio').row()
-    .text('🧮 Risk Tool', 'risk-tool').text(locale === 'ar' ? '🔥 مركز الدعوة' : '🔥 Referral Center', 'referral').row()
+    .text('🧮 Risk Tool', 'risk-tool').text(locale === 'ar' ? '🚨 💰 كنز الإحالات' : '🚨 💰 Referral Rewards', 'referral').row()
     .text(x.learn, 'learn').text(x.pro, 'pro').row()
     .text(x.help, 'help');
 }
@@ -27,7 +27,7 @@ function nav(locale: 'en' | 'ar'): InlineKeyboard {
     const shareText = encodeURIComponent(locale === 'ar' ? 'جرّب CryptoPulse لتحليل سوق العملات الرقمية مباشرة داخل Telegram.' : 'Try CryptoPulse for live crypto market intelligence inside Telegram.');
     const shareUrl = encodeURIComponent(`https://t.me/${config.botUsername}?start=market`);
     keyboard.row().url(locale === 'ar' ? '📤 مشاركة CryptoPulse' : '📤 Share CryptoPulse', `https://t.me/share/url?url=${shareUrl}&text=${shareText}`);
-    keyboard.row().text(locale === 'ar' ? '🔥 مركز الدعوة' : '🔥 Referral Center', 'referral');
+    keyboard.row().text(locale === 'ar' ? '🚨 💰 كنز الإحالات' : '🚨 💰 Referral Rewards', 'referral');
   }
   return keyboard;
 }
@@ -36,12 +36,14 @@ function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   if (config.botUsername) {
     const referralUrl = `https://t.me/${config.botUsername}?startapp=ref_${userId}`;
-    const text = locale === 'ar' ? '🚀 شارك رابط دعوتك' : '🚀 Share your referral link';
-    const shareText = encodeURIComponent(locale === 'ar' ? '🚀 انضم إلى CryptoPulse لمتابعة السوق والتحليلات داخل Telegram.' : '🚀 Join CryptoPulse for live crypto market intelligence inside Telegram.');
+    const text = locale === 'ar' ? '🔥 شارك رابطك الآن' : '🔥 Share your referral link';
+    const shareText = encodeURIComponent(locale === 'ar'
+      ? '🚀 انضم إلى CryptoPulse وشارك الرابط مع أصدقائك ومجتمعات Telegram.'
+      : '🚀 Join CryptoPulse and share the referral link with your Telegram communities.');
     keyboard.url(text, `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${shareText}`);
   }
   return keyboard
-    .row().text(locale === 'ar' ? '📊 افتح مركز الإحالات' : '📊 Open Referral Center', 'referral')
+    .row().text(locale === 'ar' ? '📊 مركز الإحالات في Mini App' : '📊 Open Mini App Referral Center', 'referral')
     .row().text(locale === 'ar' ? '⬅️ الرئيسية' : '⬅️ Home', 'home');
 }
 
@@ -86,7 +88,7 @@ export function createBot(): Bot {
       { command: 'trade', description: locale === 'ar' ? 'خطة تداول' : 'Trading plan' },
       { command: 'auto', description: locale === 'ar' ? 'التداول الآلي' : 'Automated trading' },
       { command: 'portfolio', description: locale === 'ar' ? 'المحفظة' : 'Portfolio' },
-      { command: 'referral', description: locale === 'ar' ? 'مركز الدعوة والإحالات' : 'Referral center and invites' },
+      { command: 'referral', description: locale === 'ar' ? 'كنز الإحالات ومشاركة الرابط' : 'Referral rewards and sharing' },
       { command: 'alerts', description: locale === 'ar' ? 'تنبيهات العملات' : 'Crypto alerts' },
       { command: 'learn', description: locale === 'ar' ? 'تعلم التداول' : 'Learn crypto trading' },
       { command: 'help', description: x.help.replace(/^[^ ]+ /, '') },
@@ -164,8 +166,8 @@ async function showReferral(ctx: any, locale: 'en' | 'ar', edit = false): Promis
 
   const referralUrl = `https://t.me/${config.botUsername}?startapp=ref_${userId}`;
   const text = locale === 'ar'
-    ? `🔥 مركز الدعوة والإحالات\n\nشارك رابطك مع أصدقائك ومجتمعاتك على Telegram للوصول إلى CryptoPulse.\n\n🔗 رابطك الشخصي:\n${referralUrl}\n\n📌 يتم تسجيل الإحالة عندما يفتح المستخدم الجديد Mini App من رابط الدعوة.\n📊 الإحصاءات التفصيلية متاحة داخل مركز الإحالات في Mini App.`
-    : `🔥 Referral Center\n\nShare your personal link with friends and Telegram communities to bring new users to CryptoPulse.\n\n🔗 Your personal link:\n${referralUrl}\n\n📌 A referral is recorded when the new user opens the Mini App from the referral link.\n📊 Detailed referral stats are available in the Mini App Referral Center.`;
+    ? `🚨 💰 كنز الإحالات - CryptoPulse Pro\n\n🚀 لا تترك فرصة النمو تمر أمامك. شارك رابطك الشخصي مع أصدقائك ومجتمعات Telegram، وكل مستخدم جديد يدخل عبر رابطك يتم تسجيله كإحالة لك.\n\n🔥 لماذا تشارك الآن؟\n• ⚡ ابنِ شبكتك الخاصة من مستخدمي CryptoPulse.\n• 📈 تابع نمو إحالاتك ونشاطها من مركز الإحالات.\n• 🚀 مشاركة واحدة قد تفتح لك سلسلة إحالات جديدة.\n\n🔗 رابط دعوتك الشخصي:\n${referralUrl}\n\n💸 إذا كان برنامج العمولات/الأفلييت مفعلاً على حساب CryptoPulse، تُحتسب العمولات وفق شروط البرنامج والمشتريات المؤهلة، ولا توجد أرباح مضمونة.\n\n📊 افتح مركز الإحالات في Mini App لمتابعة الإحالات المسجلة والنشاط.`
+    : `🚨 💰 Referral Rewards - CryptoPulse Pro\n\n🚀 Do not miss the growth opportunity. Share your personal link with friends and Telegram communities; every new user entering through your link is recorded as your referral.\n\n🔥 Why share now?\n• ⚡ Build your own CryptoPulse referral network.\n• 📈 Track referral growth and activity from the Referral Center.\n• 🚀 One share can open the door to more referrals.\n\n🔗 Your personal referral link:\n${referralUrl}\n\n💸 If the CryptoPulse affiliate/commission program is enabled for your account, commissions are calculated according to the program terms and eligible purchases; earnings are not guaranteed.\n\n📊 Open the Mini App Referral Center to track recorded referrals and activity.`;
 
   const keyboard = referralMenu(locale, userId);
   if (edit) await ctx.editMessageText(text, { reply_markup: keyboard }); else await ctx.reply(text, { reply_markup: keyboard });
