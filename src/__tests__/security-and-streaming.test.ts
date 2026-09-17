@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { idempotencyFingerprint, requireIdempotencyHeader } from '../../apps/web/lib/security';
+import { idempotencyFingerprint, requireIdempotencyHeader } from '../../apps/web/lib/security.js';
 
 test('idempotency fingerprint is stable for the same request', () => {
   const a = idempotencyFingerprint(42, 'request-1234', { symbol: 'BTC', amount: 10 });
