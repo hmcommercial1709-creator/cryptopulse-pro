@@ -3,6 +3,8 @@ import { createBot } from './bot.js';
 import { markNextWebReady, startWebServer } from './web.js';
 
 const bot = createBot();
+await bot.init();
+console.log(`CryptoPulse bot initialized as @${bot.botInfo.username} (id=${bot.botInfo.id})`);
 const publicUrl = process.env.WEBHOOK_URL
   ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined);
 
