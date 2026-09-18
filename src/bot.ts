@@ -216,9 +216,11 @@ export function createBot(): Bot {
       : `🚀 CryptoPulse Pro\n\nLive markets, intelligence, alerts and trading tools directly inside Telegram.\n\n⭐ Pro: 299 Stars / 30 days.\n🚨 Referral growth: build your own group; only eligible paid users count.\n🏆 Growth Rewards start at 10 paid users and scale through configurable milestones under the program rules.\n\nEntry source: ${source}`;
     await ctx.reply(intro, { reply_markup: menu(locale) });
   });
+
   bot.command('markets', async (ctx) => sendMarkets(ctx, getLocale(ctx.from?.language_code)));
   bot.command('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.reply(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
-  bot.command('signals', async (ctx) => showSignals(ctx, getLocale(ctx.from?.language_code)));  bot.command('auto', async (ctx) => showAuto(ctx, getLocale(ctx.from?.language_code)));
+  bot.command('signals', async (ctx) => showSignals(ctx, getLocale(ctx.from?.language_code)));
+  bot.command('auto', async (ctx) => showAuto(ctx, getLocale(ctx.from?.language_code)));
   bot.command('portfolio', async (ctx) => {
     const locale = getLocale(ctx.from?.language_code);
     await ctx.reply(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) });
@@ -512,3 +514,144 @@ export function createBot(): Bot {
         } catch (error) {
           console.error('Risk calculator callback failed:', error);
           await safeEdit(ctx,
+            locale === 'ar'
+              ? '⚠️ تعذر الوصول إلى سعر BTC المباشر. سيعيد CryptoPulse المحاولة تلقائيًا عند الطلب.'
+              : '⚠️ Live BTC data is temporarily unavailable. CryptoPulse will retry automatically when requested.',
+            riskMenu(locale));
+        }
+        return;
+      }
+
+      console.warn('Unknown CryptoPulse callback:', data);
+    } catch (error) {
+      console.error('CryptoPulse callback failed:', { data, error });
+      try {
+        await safeEdit(ctx,
+          locale === 'ar'
+            ? '⚠️ حدث خطأ مؤقت. لم يتوقف البوت. اختر الزر مرة أخرى وسيعيد CryptoPulse المحاولة تلقائيًا.'
+            : '⚠️ A temporary error occurred. The bot is still running. Choose the button again and CryptoPulse will retry automatically.',
+          menu(locale));
+      } catch (fallbackError) {
+        console.error('Callback recovery UI failed:', fallbackError);
+      }
+    }
+  });
+
+  bot.catch((error) => console.error('CryptoPulse bot error:', error.error));
+  return bot;
+}
+
+async function showPro(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  try {
+    const base = (process.env.SUPABASE_URL ?? '') + '/rest/v1/';
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+    const headers = { apikey: key, Authorization: 'Bearer ' + key };
+    const rows = await fetch(base + 'cp_referral_program_config?id=eq.true&select=pro_price_stars,subscription_period_seconds,telegram_commission_permille&limit=1', { headers }).then(r => r.json()) as Array<{pro_price_stars:number;subscription_period_seconds:number;telegram_commission_permille:number}>;
+    const cfg = rows[0] ?? {pro_price_stars:299,subscription_period_seconds:2592000,telegram_commission_permille:150};
+    const payload = 'cryptopulse_pro:' + ctx.from.id + ':' + crypto.randomUUID();
+    const response = await fetch('https://api.telegram.org/bot' + (process.env.TELEGRAM_BOT_TOKEN ?? '') + '/createInvoiceLink', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title:'CryptoPulse Pro',description:'30-day CryptoPulse Pro access',payload,currency:'XTR',prices:[{label:'CryptoPulse Pro — 30 days',amount:Number(cfg.pro_price_stars)}],subscription_period:Number(cfg.subscription_period_seconds)})
+    });
+    const body=await response.json() as {ok?:boolean;result?:string;description?:string};
+    if(!response.ok||!body.ok||!body.result) throw new Error(body.description??'Invoice unavailable.');
+    const text = locale==='ar'
+      ? '⭐ CryptoPulse Pro\n\n299 Stars / 30 يومًا.\n\n🔥 معدل CryptoPulse الداخلي الحالي: 15% من معاملات Stars المؤهلة والمسجلة في سجل البرنامج. برنامج Telegram Affiliate الأصلي منفصل.\n🏆 مكافآت النمو: 1,000 مدفوع = 500 Stars، 10,000 = 10,000، 100,000 = 100,000، 1,000,000 = 1,000,000، 10,000,000 = 10,000,000، 100,000,000 = 100,000,000 Stars.\n\nاضغط الزر للدفع عبر Telegram Stars.'
+      : '⭐ CryptoPulse Pro\n\n299 Stars / 30 days.\n\n🔥 Target direct affiliate: 15% under Telegram\'s official program and rules.\n🏆 Growth Rewards: 1,000 paid = 500 Stars, 10,000 = 10,000, 100,000 = 100,000, 1,000,000 = 1,000,000, 10,000,000 = 10,000,000, 100,000,000 = 100,000,000 Stars.\n\nTap the button to pay with Telegram Stars.';
+    const keyboard = new InlineKeyboard().url(locale==='ar'?'⭐ ادفع 299 Stars':'⭐ Pay 299 Stars', body.result).row().text(locale==='ar'?'🚨 💰 كنز الإحالات':'🚨 💰 Referral Rewards','referral').row().text(locale==='ar'?'⬅️ الرئيسية':'⬅️ Home','home');
+    if(edit) await ctx.editMessageText(text,{reply_markup:keyboard}); else await ctx.reply(text,{reply_markup:keyboard});
+  } catch(error) {
+    const text=locale==='ar'?'⭐ Pro غير متاح للدفع حاليًا. افتح Mini App وحاول مرة أخرى.':'⭐ Pro checkout is temporarily unavailable. Open the Mini App and try again.';
+    if(edit) await ctx.editMessageText(text,{reply_markup:nav(locale)}); else await ctx.reply(text,{reply_markup:nav(locale)});
+  }
+}
+
+async function showReferral(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  const userId = Number(ctx.from?.id);
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !config.botUsername) {
+    const text = locale === 'ar' ? '👥 رابط الدعوة غير متاح حالياً.' : '👥 Referral link is not available right now.';
+    if (edit) await ctx.editMessageText(text, { reply_markup: nav(locale) }); else await ctx.reply(text, { reply_markup: nav(locale) });
+    return;
+  }
+
+  const referralUrl = `https://t.me/${config.botUsername}?start=ref_${userId}`;
+  const supabase = supabaseAdminConfig();
+  let directReferrals = 0;
+  let accruedStars = 0;
+  let ratePercent = 15;
+  let levels: Array<{threshold:number; reward:number}> = [];
+  if (supabase) {
+    try {
+      const users = await fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + userId + '&select=id&limit=1', {headers:supabase.headers}).then(r=>r.json()) as Array<{id:string}>;
+      const dbId = users[0]?.id;
+      if (dbId) {
+        const [refs, commissions, cfg, rewardLevels] = await Promise.all([
+          fetch(supabase.base + 'cp_referrals?referrer_user_id=eq.' + encodeURIComponent(dbId) + '&select=id&limit=1000', {headers:supabase.headers}).then(r=>r.json()),
+          fetch(supabase.base + 'cp_referral_commissions?referrer_user_id=eq.' + encodeURIComponent(dbId) + '&status=neq.reversed&select=commission_stars&limit=10000', {headers:supabase.headers}).then(r=>r.json()),
+          fetch(supabase.base + 'cp_referral_program_config?id=eq.true&select=telegram_commission_permille&limit=1', {headers:supabase.headers}).then(r=>r.json()),
+          fetch(supabase.base + 'cp_referral_reward_levels?select=paid_users_threshold,reward_stars&order=paid_users_threshold.asc&limit=100', {headers:supabase.headers}).then(r=>r.json())
+        ]);
+        directReferrals = Array.isArray(refs) ? refs.length : 0;
+        accruedStars = Array.isArray(commissions) ? commissions.reduce((sum,row) => sum + Number(row.commission_stars ?? 0), 0) : 0;
+        ratePercent = Number(cfg?.[0]?.telegram_commission_permille ?? 150) / 10;
+        levels = Array.isArray(rewardLevels) ? rewardLevels.map(row => ({threshold:Number(row.paid_users_threshold), reward:Number(row.reward_stars)})) : [];
+      }
+    } catch (error) {
+      console.warn('Referral summary unavailable:', error);
+    }
+  }
+  const levelTextAr = levels.length ? levels.map(l => `• ${l.threshold.toLocaleString()} مدفوع = ${l.reward.toLocaleString()} ⭐`).join('\n') : '• مستويات المكافآت قابلة للتهيئة';
+  const levelTextEn = levels.length ? levels.map(l => `• ${l.threshold.toLocaleString()} paid = ${l.reward.toLocaleString()} ⭐`).join('\n') : '• Reward milestones are configurable';
+  const text = locale === 'ar'
+    ? `🚨 💰 مركز الإحالات والمكافآت — CryptoPulse Pro\n\n⭐ Pro = 299 Telegram Stars / 30 يومًا.\n\n🔗 رابط دعوتك الشخصي:\n${referralUrl}\n\n📊 إحالاتك المباشرة: ${directReferrals.toLocaleString()}\n💰 العمولة المتراكمة: ${accruedStars.toLocaleString()} ⭐\n🔥 معدل البرنامج الحالي: ${ratePercent}% من معاملات Stars المؤهلة والمسجلة في CryptoPulse.\n\n🏆 مستويات النمو:\n${levelTextAr}\n\n⚡ كيف تعمل؟ شارك الرابط، يدخل المستخدم عبره، ثم تُسجّل عمليات Pro المؤهلة في Stars. الإحالات غير المدفوعة لا تولّد عمولة.\n\n🛡️ مكافحة الاحتيال: الحسابات الوهمية، التلاعب، الاستردادات والنشاط المخالف قد يُستبعد.\n\n📌 هذا سجل مكافآت CryptoPulse الداخلي. برنامج Telegram Affiliate الأصلي للـMini App نظام منفصل تديره Telegram وفق إعداداته وشروطه.\n\n📊 افتح مركز الإحالات في Mini App لمتابعة الإحصاءات والحالة.`
+    : `🚨 💰 Referral & Rewards Center — CryptoPulse Pro\n\n⭐ Pro = 299 Telegram Stars / 30 days.\n\n🔗 Your personal referral link:\n${referralUrl}\n\n📊 Direct referrals: ${directReferrals.toLocaleString()}\n💰 Accrued commission: ${accruedStars.toLocaleString()} ⭐\n🔥 Current program rate: ${ratePercent}% of eligible Stars transactions recorded by CryptoPulse.\n\n🏆 Growth milestones:\n${levelTextEn}\n\n⚡ How it works: share your link, the user enters through it, and eligible Pro Stars payments are recorded. Unpaid referrals do not generate commission.\n\n🛡️ Anti-fraud: fake accounts, manipulation, refunds and prohibited activity may be excluded.\n\n📌 This is CryptoPulse's internal rewards ledger. Telegram's native Mini App Affiliate Program is separate and governed by Telegram's own configuration and terms.\n\n📊 Open the Mini App Referral Center for live stats and reward status.`;
+
+  const keyboard = referralMenu(locale, userId);
+  if (edit) await ctx.editMessageText(text, { reply_markup: keyboard }); else await ctx.reply(text, { reply_markup: keyboard });
+}
+
+async function showLeaderboard(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  const supabase = supabaseAdminConfig();
+  let lines:string[]=[];
+  if(supabase){
+    try{
+      const rows=await fetch(supabase.base+'cp_referral_leaderboard?select=rank,telegram_user_id,username,display_name,qualifying_paid_users,accrued_stars&order=rank.asc&limit=10',{headers:supabase.headers}).then(r=>r.json()) as Array<{rank:number;telegram_user_id:number;username:string|null;display_name:string|null;qualifying_paid_users:number;accrued_stars:number}>;
+      lines=Array.isArray(rows)?rows.map((r)=>`#${Number(r.rank)} · ${r.username?'@'+r.username:(r.display_name??'CryptoPulse user')} · ${Number(r.qualifying_paid_users).toLocaleString()} paid · ${Number(r.accrued_stars).toLocaleString()} ⭐`):[];
+    }catch(error){ console.warn('Referral leaderboard unavailable:',error); }
+  }
+  const text=locale==='ar'
+    ? `👑 لوحة المتصدرين العالمية\n\n${lines.length?lines.join('\\n'):'لا توجد نشاطات مدفوعة مؤهلة بعد.'}\n\nيتم احتساب المستخدمين المدفوعين المؤهلين فقط؛ الحالات قيد المراجعة أو المحظورة لا تدخل الترتيب.`
+    : `👑 Global Referral Leaderboard\n\n${lines.length?lines.join('\\n'):'No qualifying paid activity yet.'}\n\nOnly qualifying paid users are ranked; held or blocked activity is excluded.`;
+  if(edit) await ctx.editMessageText(text,{reply_markup:referralMenu(locale,Number(ctx.from?.id))}); else await ctx.reply(text,{reply_markup:referralMenu(locale,Number(ctx.from?.id))});
+}
+
+async function sendMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
+  const x = t(locale);
+  const [btc, eth, sol] = requireThreeSnapshots(await getMarketSnapshots(['BTC', 'ETH', 'SOL']));
+  await ctx.reply(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)\nETH: $${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)\nSOL: $${sol.price.toLocaleString()} (${sol.change24h.toFixed(2)}%)\n\n${x.liveReady}`, { reply_markup: nav(locale) });
+}
+
+async function editMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
+  const x = t(locale);
+  const [btc, eth, sol] = requireThreeSnapshots(await getMarketSnapshots(['BTC', 'ETH', 'SOL']));
+  await ctx.editMessageText(`${x.snapshot}\n\nBTC: $${btc.price.toLocaleString()} (${btc.change24h.toFixed(2)}%)\nETH: $${eth.price.toLocaleString()} (${eth.change24h.toFixed(2)}%)\nSOL: $${sol.price.toLocaleString()} (${sol.change24h.toFixed(2)}%)\n\n${x.liveReady}`, { reply_markup: nav(locale) });
+}
+
+async function showSignals(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  const [btc, eth, sol] = requireThreeSnapshots(await getMarketSnapshots(['BTC', 'ETH', 'SOL']));
+  const text = locale === 'ar'
+    ? `⚡ إشارات السوق المباشرة\n\nBTC ${btc.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${btc.change24h.toFixed(2)}%\nETH ${eth.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${eth.change24h.toFixed(2)}%\nSOL ${sol.change24h >= 0 ? '🟢 اتجاه صاعد' : '🔴 اتجاه هابط'} — ${sol.change24h.toFixed(2)}%`
+    : `⚡ Live Market Signals\n\nBTC ${btc.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${btc.change24h.toFixed(2)}%\nETH ${eth.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${eth.change24h.toFixed(2)}%\nSOL ${sol.change24h >= 0 ? '🟢 Bullish' : '🔴 Bearish'} — ${sol.change24h.toFixed(2)}%`;
+  if (edit) await ctx.editMessageText(text, { reply_markup: nav(locale) }); else await ctx.reply(text, { reply_markup: nav(locale) });
+}
+
+async function showAuto(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  const text = locale === 'ar' ? '🤖 التداول الآلي\n\nالتنفيذ الآلي يتم داخل Mini App بعد توثيق مستخدم Telegram وربط حسابه الخاص.' : '🤖 Auto Trading\n\nAutomated execution runs inside the Mini App after Telegram verification and user-specific exchange connection.';
+  if (edit) await ctx.editMessageText(text, { reply_markup: nav(locale) }); else await ctx.reply(text, { reply_markup: nav(locale) });
+}
+
+export async function startBot(): Promise<void> {
+  if (!config.botToken) throw new Error('TELEGRAM_BOT_TOKEN is required to start the bot.');
+  const bot = createBot();
+  await bot.start({ onStart: (info) => console.log(`CryptoPulse Pro started as @${info.username}`) });
+}
