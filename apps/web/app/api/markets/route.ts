@@ -41,8 +41,8 @@ type CmcBody = {
 
 type GeckoBody = Record<string, { usd?: number; usd_24h_change?: number; usd_24h_vol?: number }>;
 
-function edgeCache(): EdgeCache | null {
-  return (globalThis as unknown as { caches?: { default?: EdgeCache } }).caches?.default ?? null;
+function edgeCache(): Cache | null {
+  return (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default ?? null;
 }
 
 function cacheKey(symbol: string): Request {
