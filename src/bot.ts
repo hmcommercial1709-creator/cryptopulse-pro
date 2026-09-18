@@ -84,11 +84,13 @@ async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<vo
 
 function menu(locale: 'en' | 'ar'): InlineKeyboard {
   const x = t(locale);
+  const referralLabel = locale === 'ar' ? '🚨 💰 مركز الإحالات والمكافآت' : '🚨 💰 Referral Center';
   return new InlineKeyboard()
     .text(x.markets, 'markets').text('⚡ Signals', 'signals').row()
     .text(x.trade, 'trade').text('🤖 Auto Trade', 'auto').row()
     .text(x.alerts, 'alerts').text('💼 Portfolio', 'portfolio').row()
-    .text('🧮 Risk Tool', 'risk-tool').text(locale === 'ar' ? '🚨 💰 كنز الإحالات' : '🚨 💰 Referral Rewards', 'referral').row()
+    .text('🧮 Risk Tool', 'risk-tool')
+    .webApp(referralLabel, `${config.miniAppUrl}/mini/referral`).row()
     .text(x.learn, 'learn').text(x.pro, 'pro').row()
     .text(x.help, 'help');
 }
@@ -121,7 +123,7 @@ function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
     keyboard.url(text, `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${shareText}`);
   }
   return keyboard
-    .row().text(locale === 'ar' ? '📊 مركز الإحالات في Mini App' : '📊 Open Mini App Referral Center', 'referral')
+    .row().webApp(locale === 'ar' ? '📊 فتح مركز الإحالات في Mini App' : '📊 Open Referral Center in Mini App', `${config.miniAppUrl}/mini/referral`)
     .row().text(locale === 'ar' ? '👑 لوحة المتصدرين العالمية' : '👑 Global Leaderboard', 'leaderboard')
     .row().text(locale === 'ar' ? '⬅️ الرئيسية' : '⬅️ Home', 'home');
 }
