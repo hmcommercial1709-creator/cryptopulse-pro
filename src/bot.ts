@@ -6,12 +6,19 @@ import { getLocale, t } from './i18n.js';
 
 const REQUEST_DEDUP_WINDOW_MS = 1_250;
 const recentRequests = new Map<string, number>();
+const inFlightRequests = new Map<string, Promise<void>>();
 
 function requestFingerprint(ctx: any): string {
   const userId = String(ctx.from?.id ?? 'anonymous');
   const action = String(ctx.callbackQuery?.data ?? ctx.message?.text ?? 'update').trim().slice(0, 120);
   const timeBucket = Math.floor(Date.now() / REQUEST_DEDUP_WINDOW_MS);
   return userId + ':' + action + ':' + timeBucket;
+}
+
+function lockKey(ctx: any): string {
+  const userId = String(ctx.from?.id ?? 'anonymous');
+  const action = String(ctx.callbackQuery?.data ?? ctx.message?.text ?? 'update').trim().slice(0, 120);
+  return userId + ':' + action;
 }
 
 function isDuplicateRapidRequest(ctx: any): boolean {
@@ -179,6 +186,16 @@ export function createBot(): Bot {
     if (isDuplicateRapidRequest(ctx)) {
       return;
     }
+    const key = lockKey(ctx);
+    const active = inFlightRequests.get(key);
+    if (active) {
+      // A second identical action arriving while the first is still executing is
+      // acknowledged above, then ignored instead of creating concurrent writes.
+      return;
+    }
+    let release!: () => void;
+    const lock = new Promise<void>((resolve) => { release = resolve; });
+    inFlightRequests.set(key, lock);
     try {
       await next();
     } catch (error) {
@@ -203,6 +220,9 @@ export function createBot(): Bot {
       } catch (recoveryError) {
         console.error('Omni-Core user recovery response failed:', recoveryError);
       }
+    } finally {
+      release();
+      if (inFlightRequests.get(key) === lock) inFlightRequests.delete(key);
     }
   });
 
