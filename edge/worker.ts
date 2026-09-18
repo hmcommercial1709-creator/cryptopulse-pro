@@ -1,6 +1,9 @@
 import { Bot, InlineKeyboard } from 'grammy';
 
-interface ExecutionContextLike { waitUntil(promise: Promise<unknown>): void; }\ninterface ScheduledControllerLike { cron: string; scheduledTime: number; }\n\nexport interface Env {
+interface ExecutionContextLike { waitUntil(promise: Promise<unknown>): void; }
+interface ScheduledControllerLike { cron: string; scheduledTime: number; }
+
+export interface Env {
   BOT_TOKEN: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
   SUPABASE_URL: string;
