@@ -4,6 +4,84 @@ import { getMarketSnapshot, getMarketSnapshots } from './market.js';
 import { buildBeginnerTradePlan, type RiskLevel } from './domain.js';
 import { getLocale, t } from './i18n.js';
 
+function supabaseAdminConfig(): { base: string; headers: Record<string, string> } | null {
+  const url = process.env.SUPABASE_URL?.trim();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!url || !key) return null;
+  return {
+    base: url.replace(/\\/$/, '') + '/rest/v1/',
+    headers: { apikey: key, Authorization: 'Bearer ' + key },
+  };
+}
+
+async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<void> {
+  const telegramUser = ctx.from;
+  if (!telegramUser?.id) return;
+  const supabase = supabaseAdminConfig();
+  if (!supabase) {
+    console.warn('Referral attribution skipped: Supabase admin environment is not configured.');
+    return;
+  }
+
+  const language = telegramUser.language_code === 'ar' ? 'ar' : 'en';
+  const displayName = [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' ').slice(0, 120) || null;
+  const username = telegramUser.username?.slice(0, 120) ?? null;
+
+  try {
+    const response = await fetch(supabase.base + 'cp_users?on_conflict=telegram_user_id', {
+      method: 'POST',
+      headers: { ...supabase.headers, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({
+        telegram_user_id: telegramUser.id,
+        username,
+        display_name: displayName,
+        language,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+
+    const refMatch = /^ref_([0-9]{1,20})$/.exec(referralPayload.trim());
+    if (!refMatch) return;
+
+    const referrerTelegramId = Number(refMatch[1]);
+    if (!Number.isSafeInteger(referrerTelegramId) || referrerTelegramId <= 0 || referrerTelegramId === telegramUser.id) return;
+
+    const [referrerResponse, referredResponse] = await Promise.all([
+      fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + referrerTelegramId + '&select=id&limit=1', { headers: supabase.headers }),
+      fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + telegramUser.id + '&select=id&limit=1', { headers: supabase.headers }),
+    ]);
+    const referrers = await referrerResponse.json() as Array<{ id: string }>;
+    const referred = await referredResponse.json() as Array<{ id: string }>;
+    const referrerId = referrers[0]?.id;
+    const referredId = referred[0]?.id;
+    if (!referrerId || !referredId || referrerId === referredId) return;
+
+    await fetch(supabase.base + 'cp_referrals?on_conflict=referred_user_id', {
+      method: 'POST',
+      headers: { ...supabase.headers, 'Content-Type': 'application/json', Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify({
+        referrer_user_id: referrerId,
+        referred_user_id: referredId,
+        source: 'telegram_start',
+      }),
+    });
+
+    await fetch(supabase.base + 'cp_growth_events', {
+      method: 'POST',
+      headers: { ...supabase.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegram_user_id: telegramUser.id,
+        event: 'start_referral',
+        source: 'referral',
+        metadata: { referrerTelegramId, source: 'telegram_start' },
+      }),
+    });
+  } catch (error) {
+    console.error('Telegram referral attribution failed:', error);
+  }
+}
+
 function menu(locale: 'en' | 'ar'): InlineKeyboard {
   const x = t(locale);
   return new InlineKeyboard()
@@ -35,7 +113,7 @@ function nav(locale: 'en' | 'ar'): InlineKeyboard {
 function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   if (config.botUsername) {
-    const referralUrl = `https://t.me/${config.botUsername}?startapp=ref_${userId}`;
+    const referralUrl = `https://t.me/${config.botUsername}?start=ref_${userId}`;
     const text = locale === 'ar' ? '🔥 شارك رابطك الآن' : '🔥 Share your referral link';
     const shareText = encodeURIComponent(locale === 'ar'
       ? '🚀 انضم إلى CryptoPulse وشارك الرابط مع أصدقائك ومجتمعات Telegram.'
@@ -61,7 +139,8 @@ export function createBot(): Bot {
 
   bot.command('start', async (ctx) => {
     const locale = getLocale(ctx.from?.language_code);
-    const payload = typeof ctx.match === 'string' ? ctx.match.trim() : '';
+    const payload = typeof ctx.match === 'string' ? ctx.match.trim().slice(0, 64) : '';
+    await ensureTelegramUser(ctx, payload);
     const source = payload || 'direct';
     const intro = locale === 'ar'
       ? `🚀 CryptoPulse Pro\n\nالسوق والتحليلات والتنبيهات وأدوات التداول مباشرة داخل Telegram.\n\n⭐ Pro: 299 Stars / 30 يومًا.\n🚨 برنامج الإحالات: ابنِ مجموعتك، والاحتساب يكون على المستخدمين المدفوعين المؤهلين فقط.\n🏆 مكافآت النمو تبدأ من 1,000 مدفوع وتصل إلى مستويات أعلى وفق قواعد البرنامج.\n\nمصدر الدخول: ${source}`
