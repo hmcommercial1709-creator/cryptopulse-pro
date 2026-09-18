@@ -70,7 +70,9 @@ async function fetchCoinGecko(symbols: string[]): Promise<Map<string, MarketSnap
   });
   const result = new Map<string, MarketSnapshot>();
   for (const symbol of supported) {
-    const row = payload[geckoIds[symbol]];
+    const id = geckoIds[symbol];
+    if (!id) continue;
+    const row = payload[id];
     if (!row) continue;
     result.set(symbol, snapshot(symbol, row.usd, row.usd_24h_change, row.usd_24h_vol));
   }
