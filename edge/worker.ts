@@ -171,15 +171,34 @@ async function telegram(env: Env, method: string, body: Record<string, unknown>)
   }
 }
 
-function createBot(env: Env): Bot {
-  const bot = new Bot(env.BOT_TOKEN);
+let cachedBotInfo: any | undefined;
+
+async function createBot(env: Env): Promise<Bot> {
+  const bot = cachedBotInfo
+    ? new Bot(env.BOT_TOKEN, { botInfo: cachedBotInfo })
+    : new Bot(env.BOT_TOKEN);
+
+  // grammY requires bot initialization before handleUpdate() can
+  // construct a fully usable context for API-backed handlers such as ctx.reply().
+  // This is especially important in serverless/Cloudflare Workers where
+  // the bot instance is recreated for background durable-job processing.
+  if (!bot.isInited()) {
+    await bot.init();
+    cachedBotInfo = bot.botInfo;
+  }
 
   bot.use(async (ctx, next) => {
     try {
-      if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
+      if (ctx.callbackQuery) {
+        await ctx.answerCallbackQuery().catch(() => {});
+      }
       await next();
     } catch (error) {
-      console.error('Edge boundary recovered update failure:', error);
+      console.error('Edge middleware update failure:', {
+        updateId: ctx.update.update_id,
+        error: error instanceof Error ? error.stack || error.message : String(error),
+      });
+
       try {
         if (ctx.chat?.id) {
           await ctx.reply('⚠️ CryptoPulse recovered a temporary error. Please retry the action.');
@@ -187,6 +206,10 @@ function createBot(env: Env): Bot {
       } catch (fallbackError) {
         console.error('Edge fallback response failed:', fallbackError);
       }
+
+      // Do not silently swallow the original failure. processJobs() must
+      // receive it so the durable job can be retried/backed off correctly.
+      throw error;
     }
   });
 
@@ -282,12 +305,13 @@ function createBot(env: Env): Bot {
 
 async function processJobs(env: Env, limit = 20): Promise<void> {
   const jobs = await rpc(env, 'cp_claim_durable_jobs', { p_limit: limit, p_lease_seconds: 45 });
+  let bot: Bot | undefined;
 
   for (const job of jobs) {
     const id = String(job.id);
     try {
       if (job.job_type === 'telegram_update') {
-        const bot = createBot(env);
+        bot ??= await createBot(env);
         await bot.handleUpdate(job.payload);
       } else if (job.job_type === 'referral_attribution') {
         await processReferralAttribution(env, job.payload);
@@ -323,12 +347,28 @@ export default {
         return Response.json({ ok: true, service: 'cryptopulse-edge', architecture: 'cloudflare-edge+supabase-durable' });
       }
 
-      if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
-      if (env.TELEGRAM_WEBHOOK_SECRET && request.headers.get('x-telegram-bot-api-secret-token') !== env.TELEGRAM_WEBHOOK_SECRET) {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+
+      const configuredWebhookSecret = String(env.TELEGRAM_WEBHOOK_SECRET ?? '').trim();
+      const receivedWebhookSecret = request.headers.get('x-telegram-bot-api-secret-token') ?? '';
+
+      if (configuredWebhookSecret && receivedWebhookSecret !== configuredWebhookSecret) {
+        console.warn('Telegram webhook rejected: secret token mismatch');
         return new Response('Unauthorized', { status: 401 });
       }
 
       const update = await request.json();
+
+      if (
+        !update ||
+        typeof update !== 'object' ||
+        !Number.isInteger((update as any).update_id)
+      ) {
+        console.warn('Telegram webhook received malformed update');
+        return Response.json({ ok: true, accepted: false });
+      }
 
       // Telegram only needs a fast 2xx acknowledgement. Never block the webhook
       // response on Supabase, durable processing, or Telegram API calls.
