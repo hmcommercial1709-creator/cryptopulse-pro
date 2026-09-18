@@ -117,16 +117,45 @@ export async function getMarketSnapshots(symbols: string[]): Promise<MarketSnaps
   }
 
   if (missing.length) {
-    try {
-      const fetched = await fetchSources(missing);
-      for (const symbol of missing) {
-        const value = fetched.get(symbol);
-        if (!value) continue;
-        cache.set(symbol, { value, freshUntil: now + CACHE_TTL_MS, staleUntil: now + STALE_CACHE_TTL_MS });
-        result.set(symbol, value);
+    const staleSymbols = missing.filter((symbol) => {
+      const cached = cache.get(symbol);
+      return Boolean(cached && cached.staleUntil > now);
+    });
+    const coldSymbols = missing.filter((symbol) => !staleSymbols.includes(symbol));
+
+    // Stale-while-revalidate: return known-good data immediately and refresh it in the
+    // background. Cold symbols still await the first usable provider response.
+    for (const symbol of staleSymbols) {
+      const cached = cache.get(symbol);
+      if (cached) result.set(symbol, cached.value);
+    }
+
+    if (coldSymbols.length) {
+      try {
+        const fetched = await fetchSources(coldSymbols);
+        for (const symbol of coldSymbols) {
+          const value = fetched.get(symbol);
+          if (!value) continue;
+          cache.set(symbol, { value, freshUntil: now + CACHE_TTL_MS, staleUntil: now + STALE_CACHE_TTL_MS });
+          result.set(symbol, value);
+        }
+      } catch (error) {
+        console.error('Cold market providers failed:', error);
       }
-    } catch (error) {
-      console.error('Live market providers failed:', error);
+    }
+
+    if (staleSymbols.length) {
+      void fetchSources(staleSymbols).then((fetched) => {
+        const refreshNow = Date.now();
+        for (const symbol of staleSymbols) {
+          const value = fetched.get(symbol);
+          if (value) {
+            cache.set(symbol, { value, freshUntil: refreshNow + CACHE_TTL_MS, staleUntil: refreshNow + STALE_CACHE_TTL_MS });
+          }
+        }
+      }).catch((error) => {
+        console.warn('Background market refresh failed; stale cache remains active:', error);
+      });
     }
   }
 
