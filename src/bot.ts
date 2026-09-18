@@ -89,8 +89,10 @@ function menu(locale: 'en' | 'ar'): InlineKeyboard {
     .text(x.markets, 'markets').text('⚡ Signals', 'signals').row()
     .text(x.trade, 'trade').text('🤖 Auto Trade', 'auto').row()
     .text(x.alerts, 'alerts').text('💼 Portfolio', 'portfolio').row()
-    .text('🧮 Risk Tool', 'risk-tool')
-    .webApp(referralLabel, `${config.miniAppUrl}/mini/referral`).row()
+    .text('🧮 Risk Tool', 'risk-tool').row()
+    // Use a standard callback entry so every Telegram client renders the referral button.
+    // The referral screen then exposes the authenticated Mini App WebApp button.
+    .text(referralLabel, 'referral').row()
     .text(x.learn, 'learn').text(x.pro, 'pro').row()
     .text(x.help, 'help');
 }
