@@ -26,4 +26,4 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npx wrangler deploy --dry-run --config wrangler.toml
-      - run: npm --prefix apps/web run deploy:edge -- --dry-run
+      - run: npm --prefix apps/web run build:edge
