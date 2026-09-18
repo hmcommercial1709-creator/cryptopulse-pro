@@ -9,7 +9,7 @@ function supabaseAdminConfig(): { base: string; headers: Record<string, string> 
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) return null;
   return {
-    base: url.replace(/\\/$/, '') + '/rest/v1/',
+    base: url.replace(/\/$/, '') + '/rest/v1/',
     headers: { apikey: key, Authorization: 'Bearer ' + key },
   };
 }
