@@ -52,6 +52,30 @@ async function waitForMiniApp(): Promise<void> {
 
 void waitForMiniApp();
 
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`CryptoPulse shutdown requested by ${signal}`);
+
+  try {
+    await bot.stop();
+  } catch (error) {
+    console.error('Telegram bot shutdown failed:', error);
+  }
+
+  if (nextProcess.exitCode === null && !nextProcess.killed) {
+    nextProcess.kill('SIGTERM');
+  }
+}
+
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+
 bot.api.setWebhook(webhookUrl, {
   ...(webhookSecret ? { secret_token: webhookSecret } : {}),
   allowed_updates: ['message', 'callback_query', 'inline_query'],
