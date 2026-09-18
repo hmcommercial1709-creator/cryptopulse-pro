@@ -28,6 +28,9 @@
     "@types/node": "^24.3.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "wrangler": "latest"
+    "wrangler": "4.134.0"
+  },
+  "engines": {
+    "node": ">=22 <23"
   }
 }
