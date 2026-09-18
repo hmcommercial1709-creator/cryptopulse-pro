@@ -7,11 +7,8 @@ const ASSETS = [
   { id: 5426, symbol: 'SOL' },
 ] as const;
 
-type CmcQuote = {
-  id?: number;
-  symbol?: string;
-  quote?: { USD?: { price?: number; percent_change_24h?: number; volume_24h?: number } };
-};
+type CmcUsdQuote = { symbol?: string; price?: number; percent_change_24h?: number; volume_24h?: number };
+type CmcAsset = { id?: number; symbol?: string; quote?: CmcUsdQuote[] | { USD?: CmcUsdQuote } };
 
 export async function GET() {
   const apiKey = process.env.MARKET_DATA_API_KEY;
@@ -29,17 +26,19 @@ export async function GET() {
       cache: 'no-store',
       signal: controller.signal,
     });
-    const body = (await response.json()) as { data?: Record<string, CmcQuote>; status?: { error_message?: string } };
+    const body = (await response.json()) as { data?: Record<string, CmcAsset> | CmcAsset[]; status?: { error_message?: string } };
 
     if (!response.ok || !body.data) {
       return NextResponse.json({ error: body.status?.error_message ?? `Market provider returned ${response.status}.` }, { status: 502 });
     }
 
     const markets = ASSETS.map(({ id, symbol }) => {
-      const item = body.data?.[String(id)];
+      const item = Array.isArray(body.data)
+        ? body.data.find((entry) => Number(entry.id) === id || entry.symbol === symbol)
+        : body.data?.[String(id)];
       const quote = Array.isArray(item?.quote)
-        ? item.quote.find((entry: { symbol?: string }) => entry.symbol === 'USD')
-        : (item?.quote as unknown as { price?: number; percent_change_24h?: number; volume_24h?: number } | undefined);
+        ? item.quote.find((entry) => entry.symbol === 'USD')
+        : item?.quote?.USD;
       if (!quote || typeof quote.price !== 'number' || typeof quote.percent_change_24h !== 'number') {
         throw new Error(`Incomplete market data for ${symbol}.`);
       }
