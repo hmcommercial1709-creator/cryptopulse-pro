@@ -1,4 +1,7 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
+
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
 
 const CMC_URL = 'https://pro-api.coinmarketcap.com/v3/cryptocurrency/quotes/latest';
 const CG_URL = 'https://api.coingecko.com/api/v3/simple/price';
@@ -38,7 +41,13 @@ type CmcBody = {
 
 type GeckoBody = Record<string, { usd?: number; usd_24h_change?: number; usd_24h_vol?: number }>;
 
-const cache = new Map<string, CacheEntry>();
+function edgeCache(): EdgeCache | null {
+  return (globalThis as unknown as { caches?: { default?: EdgeCache } }).caches?.default ?? null;
+}
+
+function cacheKey(symbol: string): Request {
+  return new Request('https://cryptopulse-edge-cache.invalid/markets/' + encodeURIComponent(symbol));
+}
 
 function validMarket(symbol: string, price: unknown, change24h: unknown, volume24h: unknown): Market | null {
   const numericPrice = Number(price);
@@ -124,20 +133,33 @@ async function fetchProviders(): Promise<Map<string, Market>> {
   return result;
 }
 
-function cacheMarkets(markets: Map<string, Market>, now: number): void {
+async function cacheMarkets(markets: Map<string, Market>, now: number): Promise<void> {
+  const cache = edgeCache();
+  if (!cache) return;
   for (const [symbol, value] of markets) {
-    cache.set(symbol, {
+    const entry: CacheEntry = {
       value,
       freshUntil: now + FRESH_TTL_MS,
       staleUntil: now + STALE_TTL_MS,
-    });
+    };
+    await cache.put(cacheKey(symbol), new Response(JSON.stringify(entry), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
   }
 }
 
-function readCache(symbol: string, now: number): { value: Market; stale: boolean } | null {
-  const entry = cache.get(symbol);
-  if (!entry || entry.staleUntil <= now) return null;
-  return { value: entry.value, stale: entry.freshUntil <= now };
+async function readCache(symbol: string, now: number): Promise<{ value: Market; stale: boolean } | null> {
+  const cache = edgeCache();
+  if (!cache) return null;
+  const response = await cache.match(cacheKey(symbol));
+  if (!response) return null;
+  try {
+    const entry = await response.json() as CacheEntry;
+    if (!entry?.staleUntil || entry.staleUntil <= now || !entry.value) return null;
+    return { value: entry.value, stale: entry.freshUntil <= now };
+  } catch {
+    return null;
+  }
 }
 
 async function getResilientMarkets(): Promise<{ markets: Market[]; stale: boolean }> {
@@ -147,7 +169,7 @@ async function getResilientMarkets(): Promise<{ markets: Market[]; stale: boolea
   const missing: typeof ASSETS[number]['symbol'][] = [];
 
   for (const asset of ASSETS) {
-    const cached = readCache(asset.symbol, now);
+    const cached = await readCache(asset.symbol, now);
     if (cached && !cached.stale) result.set(asset.symbol, cached.value);
     else if (cached) {
       result.set(asset.symbol, cached.value);
@@ -160,8 +182,10 @@ async function getResilientMarkets(): Promise<{ markets: Market[]; stale: boolea
   // Serve stale data immediately and refresh it asynchronously. Cold-start requests
   // wait only for the parallel providers, never for one provider behind another.
   if (missing.length === 0 && hasStale) {
-    void fetchProviders().then(values => cacheMarkets(values, Date.now())).catch(error => {
-      console.warn('Background market refresh failed; stale cache retained:', error);
+    after(async () => {
+      await fetchProviders().then(values => cacheMarkets(values, Date.now())).catch(error => {
+        console.warn('Background market refresh failed; stale cache retained:', error);
+      });
     });
     return { markets: ASSETS.map(asset => result.get(asset.symbol)!).filter(Boolean), stale: true };
   }
@@ -172,7 +196,7 @@ async function getResilientMarkets(): Promise<{ markets: Market[]; stale: boolea
 
   try {
     const fresh = await fetchProviders();
-    cacheMarkets(fresh, Date.now());
+    await cacheMarkets(fresh, Date.now());
     for (const asset of ASSETS) {
       const value = fresh.get(asset.symbol);
       if (value) result.set(asset.symbol, value);
