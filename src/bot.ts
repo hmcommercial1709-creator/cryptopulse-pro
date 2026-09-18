@@ -64,8 +64,8 @@ export function createBot(): Bot {
     const payload = typeof ctx.match === 'string' ? ctx.match.trim() : '';
     const source = payload || 'direct';
     const intro = locale === 'ar'
-      ? `🚀 CryptoPulse Pro\n\nالسوق والتحليلات والتنبيهات وأدوات التداول مباشرة داخل Telegram.\n\nمصدر الدخول: ${source}`
-      : `🚀 CryptoPulse Pro\n\nLive markets, intelligence, alerts and trading tools directly inside Telegram.\n\nEntry source: ${source}`;
+      ? `🚀 CryptoPulse Pro\n\nالسوق والتحليلات والتنبيهات وأدوات التداول مباشرة داخل Telegram.\n\n⭐ Pro: 299 Stars / 30 يومًا.\n🚨 برنامج الإحالات: ابنِ مجموعتك، والاحتساب يكون على المستخدمين المدفوعين المؤهلين فقط.\n🏆 مكافآت النمو تبدأ من 1,000 مدفوع وتصل إلى مستويات أعلى وفق قواعد البرنامج.\n\nمصدر الدخول: ${source}`
+      : `🚀 CryptoPulse Pro\n\nLive markets, intelligence, alerts and trading tools directly inside Telegram.\n\n⭐ Pro: 299 Stars / 30 days.\n🚨 Referral growth: build your own group; only eligible paid users count.\n🏆 Growth Rewards start at 1,000 paid users and scale to higher milestones under the program rules.\n\nEntry source: ${source}`;
     await ctx.reply(intro, { reply_markup: menu(locale) });
   });
 
@@ -78,6 +78,7 @@ export function createBot(): Bot {
     await ctx.reply(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) });
   });
   bot.command('referral', async (ctx) => showReferral(ctx, getLocale(ctx.from?.language_code)));
+  bot.command('pro', async (ctx) => showPro(ctx, getLocale(ctx.from?.language_code)));
   bot.on('message:successful_payment', async (ctx) => {
     try {
       const payment = ctx.message.successful_payment;
@@ -129,6 +130,7 @@ export function createBot(): Bot {
       { command: 'auto', description: locale === 'ar' ? 'التداول الآلي' : 'Automated trading' },
       { command: 'portfolio', description: locale === 'ar' ? 'المحفظة' : 'Portfolio' },
       { command: 'referral', description: locale === 'ar' ? 'كنز الإحالات ومشاركة الرابط' : 'Referral rewards and sharing' },
+      { command: 'pro', description: locale === 'ar' ? 'اشتراك Pro عبر Stars' : 'Subscribe to Pro with Stars' },
       { command: 'alerts', description: locale === 'ar' ? 'تنبيهات العملات' : 'Crypto alerts' },
       { command: 'learn', description: locale === 'ar' ? 'تعلم التداول' : 'Learn crypto trading' },
       { command: 'help', description: x.help.replace(/^[^ ]+ /, '') },
@@ -176,7 +178,7 @@ export function createBot(): Bot {
 
   bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).learnText, { reply_markup: nav(locale) }); });
   bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).alertsText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).proText, { reply_markup: nav(locale) }); });
+  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showPro(ctx, locale, true); });
   bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).helpText, { reply_markup: nav(locale) }); });
   bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).start, { reply_markup: menu(locale) }); });
   bot.on('callback_query:data', async (ctx) => {
@@ -194,6 +196,31 @@ export function createBot(): Bot {
 
   bot.catch((error) => console.error('CryptoPulse bot error:', error.error));
   return bot;
+}
+
+async function showPro(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  try {
+    const base = (process.env.SUPABASE_URL ?? '') + '/rest/v1/';
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+    const headers = { apikey: key, Authorization: 'Bearer ' + key };
+    const rows = await fetch(base + 'cp_referral_program_config?id=eq.true&select=pro_price_stars,subscription_period_seconds,telegram_commission_permille&limit=1', { headers }).then(r => r.json()) as Array<{pro_price_stars:number;subscription_period_seconds:number;telegram_commission_permille:number}>;
+    const cfg = rows[0] ?? {pro_price_stars:299,subscription_period_seconds:2592000,telegram_commission_permille:150};
+    const payload = 'cryptopulse_pro:' + ctx.from.id + ':' + crypto.randomUUID();
+    const response = await fetch('https://api.telegram.org/bot' + (process.env.TELEGRAM_BOT_TOKEN ?? '') + '/createInvoiceLink', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title:'CryptoPulse Pro',description:'30-day CryptoPulse Pro access',payload,currency:'XTR',prices:[{label:'CryptoPulse Pro — 30 days',amount:Number(cfg.pro_price_stars)}],subscription_period:Number(cfg.subscription_period_seconds)})
+    });
+    const body=await response.json() as {ok?:boolean;result?:string;description?:string};
+    if(!response.ok||!body.ok||!body.result) throw new Error(body.description??'Invoice unavailable.');
+    const text = locale==='ar'
+      ? '⭐ CryptoPulse Pro\n\n299 Stars / 30 يومًا.\n\n🔥 الإحالة المستهدفة: 15% عمولة مباشرة وفق برنامج Telegram الرسمي وشروطه.\n🏆 مكافآت النمو: 1,000 مدفوع = 500 Stars، 10,000 = 10,000، 100,000 = 100,000، 1,000,000 = 1,000,000، 10,000,000 = 10,000,000، 100,000,000 = 100,000,000 Stars.\n\nاضغط الزر للدفع عبر Telegram Stars.'
+      : '⭐ CryptoPulse Pro\n\n299 Stars / 30 days.\n\n🔥 Target direct affiliate: 15% under Telegram\'s official program and rules.\n🏆 Growth Rewards: 1,000 paid = 500 Stars, 10,000 = 10,000, 100,000 = 100,000, 1,000,000 = 1,000,000, 10,000,000 = 10,000,000, 100,000,000 = 100,000,000 Stars.\n\nTap the button to pay with Telegram Stars.';
+    const keyboard = new InlineKeyboard().url(locale==='ar'?'⭐ ادفع 299 Stars':'⭐ Pay 299 Stars', body.result).row().text(locale==='ar'?'🚨 💰 كنز الإحالات':'🚨 💰 Referral Rewards','referral').row().text(locale==='ar'?'⬅️ الرئيسية':'⬅️ Home','home');
+    if(edit) await ctx.editMessageText(text,{reply_markup:keyboard}); else await ctx.reply(text,{reply_markup:keyboard});
+  } catch(error) {
+    const text=locale==='ar'?'⭐ Pro غير متاح للدفع حاليًا. افتح Mini App وحاول مرة أخرى.':'⭐ Pro checkout is temporarily unavailable. Open the Mini App and try again.';
+    if(edit) await ctx.editMessageText(text,{reply_markup:nav(locale)}); else await ctx.reply(text,{reply_markup:nav(locale)});
+  }
 }
 
 async function showReferral(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
