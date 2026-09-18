@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { requireTelegramUser } from '../../../../../lib/mini-auth';
-import { supabaseSelect } from '../../../../../lib/supabase-admin';
+import { requireTelegramUser } from '../../../../lib/mini-auth';
+import { supabaseSelect } from '../../../../lib/supabase-admin';
 
 type Row={rank:number;telegram_user_id:number;username:string|null;display_name:string|null;qualifying_paid_users:number;accrued_stars:number};
 
