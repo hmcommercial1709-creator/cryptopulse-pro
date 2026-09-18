@@ -37,7 +37,7 @@ async function proxyToNext(req: IncomingMessage, res: ServerResponse): Promise<v
   const response = await fetch(target, {
     method: req.method ?? 'GET',
     headers,
-    body: body && body.length ? body : undefined,
+    ...(body && body.length ? { body } : {}),
     redirect: 'manual',
   });
 
