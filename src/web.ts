@@ -28,7 +28,7 @@ async function proxyToNext(req: IncomingMessage, res: ServerResponse): Promise<v
   const target = `http://127.0.0.1:${NEXT_PORT}${req.url ?? '/'}`;
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
-    if (value == null || key === 'host' || key === 'content-length' || key === 'connection') continue;
+    if (value == null || key === 'host' || key === 'content-length' || key === 'connection' || key === 'accept-encoding') continue;
     headers.set(key, Array.isArray(value) ? value.join(', ') : value);
   }
 
