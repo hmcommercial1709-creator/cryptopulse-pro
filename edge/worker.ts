@@ -54,6 +54,77 @@ async function acceptUpdate(env: Env, update: any): Promise<boolean> {
   return rows[0]?.accepted === true;
 }
 
+
+async function acceptDurableJob(env: Env, key: string, operation: string, actorKey: string, jobType: string, payload: unknown): Promise<boolean> {
+  const rows = await rpc(env, 'cp_edge_accept', {
+    p_idempotency_key: key,
+    p_operation: operation,
+    p_actor_key: actorKey,
+    p_job_type: jobType,
+    p_payload: payload,
+    p_max_attempts: 8,
+  });
+  return rows[0]?.accepted === true;
+}
+
+async function processReferralAttribution(env: Env, payload: any): Promise<void> {
+  const { base, headers } = supabase(env);
+  const userId = Number(payload.userId);
+  const referralPayload = String(payload.referralPayload ?? '');
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !/^ref_[A-Za-z0-9_-]{1,64}$/.test(referralPayload)) return;
+
+  const token = referralPayload.slice(4);
+  const referrerQuery = /^\d+$/.test(token)
+    ? 'telegram_user_id=eq.' + encodeURIComponent(token)
+    : 'referral_code=eq.' + encodeURIComponent(token.toLowerCase());
+
+  const [referrerRows, referredRows] = await Promise.all([
+    fetch(base + 'cp_users?' + referrerQuery + '&select=id,telegram_user_id&limit=1', { headers }).then(r => r.json()) as Promise<Array<{id:string;telegram_user_id:number}>>,
+    fetch(base + 'cp_users?telegram_user_id=eq.' + userId + '&select=id&limit=1', { headers }).then(r => r.json()) as Promise<Array<{id:string}>>
+  ]);
+  const referrer = referrerRows[0];
+  const referred = referredRows[0];
+  if (!referrer?.id || !referred?.id || referrer.id === referred.id || Number(referrer.telegram_user_id) === userId) return;
+
+  await fetch(base + 'cp_referrals?on_conflict=referred_user_id', {
+    method: 'POST',
+    headers: { ...headers, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify({
+      referrer_user_id: referrer.id,
+      referred_user_id: referred.id,
+      source: 'telegram_start_edge',
+    }),
+  });
+}
+
+async function processStarsPayment(env: Env, payload: any): Promise<void> {
+  const { base, headers } = supabase(env);
+  const payment = payload.payment;
+  const telegramUserId = Number(payload.telegramUserId);
+  if (!payment || !Number.isSafeInteger(telegramUserId) || telegramUserId <= 0) return;
+
+  const users = await fetch(base + 'cp_users?telegram_user_id=eq.' + telegramUserId + '&select=id&limit=1', { headers }).then(r => r.json()) as Array<{id:string}>;
+  const userId = users[0]?.id;
+  if (!userId) throw new Error('Stars payment received before user registration.');
+
+  await fetch(base + 'cp_stars_payments?on_conflict=telegram_payment_charge_id', {
+    method: 'POST',
+    headers: { ...headers, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify({
+      user_id: userId,
+      telegram_user_id: telegramUserId,
+      plan: 'pro',
+      amount_stars: Number(payment.total_amount ?? 0),
+      currency: payment.currency ?? 'XTR',
+      invoice_payload: payment.invoice_payload ?? null,
+      telegram_payment_charge_id: payment.telegram_payment_charge_id,
+      provider_payment_charge_id: payment.provider_payment_charge_id ?? null,
+      is_recurring: Boolean(payment.is_recurring),
+      is_first_recurring: Boolean(payment.is_first_recurring),
+    }),
+  });
+}
+
 async function telegram(env: Env, method: string, body: Record<string, unknown>): Promise<any> {
   const response = await fetch('https://api.telegram.org/bot' + env.BOT_TOKEN + '/' + method, {
     method: 'POST',
@@ -121,7 +192,17 @@ function createBot(env: Env): Bot {
     );
 
     if (payload && userId) {
-      ctx.api.sendMessage(userId, locale === 'ar' ? '🔗 تم تسجيل مصدر الإحالة بشكل آمن.' : '🔗 Referral source recorded safely.').catch(() => {});
+      const accepted = await acceptDurableJob(
+        env,
+        'referral:start:' + userId + ':' + payload,
+        'referral_attribution',
+        String(userId),
+        'referral_attribution',
+        { userId, referralPayload: payload },
+      );
+      if (accepted) {
+        ctx.api.sendMessage(userId, locale === 'ar' ? '🔗 تم تسجيل الإحالة وإدخالها في طابور المعالجة الموزع.' : '🔗 Referral recorded and placed into the distributed execution queue.').catch(() => {});
+      }
     }
   });
 
@@ -147,6 +228,20 @@ function createBot(env: Env): Bot {
     await ctx.editMessageText('⭐ Pro checkout is processed through the durable Stars/payment event path.');
   });
 
+  bot.on('message:successful_payment', async (ctx) => {
+    const payment = ctx.message.successful_payment;
+    const accepted = await acceptDurableJob(
+      env,
+      'stars:' + payment.telegram_payment_charge_id,
+      'stars_payment',
+      String(ctx.from.id),
+      'stars_payment',
+      { telegramUserId: ctx.from.id, payment },
+    );
+    if (accepted) await ctx.reply('⭐ Payment received and queued for durable processing.');
+    else await ctx.reply('⭐ Payment already accepted and is being processed safely.');
+  });
+
   return bot;
 }
 
@@ -159,6 +254,10 @@ async function processJobs(env: Env, limit = 20): Promise<void> {
       if (job.job_type === 'telegram_update') {
         const bot = createBot(env);
         await bot.handleUpdate(job.payload);
+      } else if (job.job_type === 'referral_attribution') {
+        await processReferralAttribution(env, job.payload);
+      } else if (job.job_type === 'stars_payment') {
+        await processStarsPayment(env, job.payload);
       } else {
         throw new Error('Unknown durable job type: ' + String(job.job_type));
       }
