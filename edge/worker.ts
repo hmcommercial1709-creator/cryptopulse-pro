@@ -15,13 +15,29 @@ export interface Env {
 type SupabaseRow = Record<string, unknown>;
 
 function supabase(env: Env) {
-  const base = env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/';
+  const rawUrl = String(
+    env?.SUPABASE_URL || 'https://vodxbdhlxqnmbajulpun.supabase.co'
+  ).trim();
+
+  const rawKey = String(
+    env?.SUPABASE_SERVICE_ROLE_KEY || ''
+  ).trim();
+
+  if (!rawKey) {
+    throw new Error(
+      'Missing Cloudflare Worker secret: SUPABASE_SERVICE_ROLE_KEY'
+    );
+  }
+
+  const base = rawUrl.replace(/\/$/, '') + '/rest/v1/';
+
   const headers = {
-    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY,
+    apikey: rawKey,
+    Authorization: 'Bearer ' + rawKey,
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
+
   return { base, headers };
 }
 
