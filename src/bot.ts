@@ -145,7 +145,10 @@ function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   if (config.botUsername) {
     const referralUrl = `https://t.me/${config.botUsername}?start=ref_${userId}`;
-    const text = locale === 'ar' ? '🔥 شارك رابطك الآن' : '🔥 Share your referral link';
+    const shareText = encodeURIComponent(locale === 'ar'
+      ? '🚀 انضم إلى CryptoPulse عبر رابط الإحالة الخاص بي وابدأ استخدام أدوات السوق والتحليل.'
+      : '🚀 Join CryptoPulse through my referral link and use live crypto market tools.');
+    const text = locale === 'ar' ? '📣 شارك رابطك واكسب Stars المؤهلة' : '📣 Share your link & earn eligible Stars';
     const shareText = encodeURIComponent(locale === 'ar'
       ? '🚀 انضم إلى CryptoPulse وشارك الرابط مع أصدقائك ومجتمعات Telegram.'
       : '🚀 Join CryptoPulse and share the referral link with your Telegram communities.');
