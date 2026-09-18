@@ -54,6 +54,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          packageManager: npm
           command: deploy --config wrangler.toml
 
   deploy-mini-app:
@@ -93,5 +94,6 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          packageManager: npm
           workingDirectory: apps/web
           command: deploy --config wrangler.toml
