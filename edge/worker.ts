@@ -1,6 +1,6 @@
-import { Bot, webhookCallback, InlineKeyboard } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 
-export interface Env {
+interface ExecutionContextLike { waitUntil(promise: Promise<unknown>): void; }\ninterface ScheduledControllerLike { cron: string; scheduledTime: number; }\n\nexport interface Env {
   BOT_TOKEN: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
   SUPABASE_URL: string;
@@ -181,7 +181,7 @@ async function processJobs(env: Env, limit = 20): Promise<void> {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
     try {
       const url = new URL(request.url);
 
@@ -208,7 +208,7 @@ export default {
     }
   },
 
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(_controller: ScheduledControllerLike, env: Env, ctx: ExecutionContextLike): Promise<void> {
     ctx.waitUntil(processJobs(env, 50).catch(error => console.error('Scheduled durable worker failed:', error)));
   },
-} satisfies ExportedHandler<Env>;
+};
