@@ -75,7 +75,7 @@ export default function ReferralPage():JSX.Element{
       <div style={{fontSize:12,opacity:.7,letterSpacing:1}}>CRYPTO PULSE PRO</div>
       <h1 style={{margin:'6px 0'}}>🚨 Referral & Rewards Center</h1>
       <p style={muted}>Turn your audience into a tracked referral network. Eligible paid activity is recorded transparently.</p>
-      <div style={price}>🔥 {rate}% referral commission rate</div>
+      <div style={price}>🔥 {rate}% CryptoPulse program rate</div>
     </div>
 
     <div style={grid}>
@@ -135,7 +135,7 @@ export default function ReferralPage():JSX.Element{
         <li>Commission is accrued only from eligible Telegram Stars payments recorded by CryptoPulse and can be held for review when integrity checks detect unusual patterns.</li>
         <li>Unpaid signups, duplicate/self-referrals, refunds, fake accounts, manipulation and prohibited activity do not qualify.</li>
         <li>Accrued rewards are subject to verification and the configured payout process; accrued does not mean instantly paid.</li>
-        <li>Telegram's native Mini App Affiliate Program is separate. Telegram documents its own affiliate commission system and referral links; CryptoPulse does not represent its internal ledger as a Telegram payout.</li>
+        <li>Telegram's native Mini App Affiliate Program is separate. CryptoPulse's internal rate and leaderboard are not a representation of Telegram's native commission.</li>
       </ol>
       <p style={fine}>For digital goods and services inside Telegram, Telegram requires Telegram Stars (XTR). Telegram also requires clear terms and support for bot payments. See the official Telegram documentation for the applicable rules.</p>
     </div>
