@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { requireTelegramUser } from '../../../lib/mini-auth';
-import { supabaseSelect } from '../../../lib/supabase-admin';
+import { requireTelegramUser } from '../../../../lib/mini-auth';
+import { supabaseSelect } from '../../../../lib/supabase-admin';
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
