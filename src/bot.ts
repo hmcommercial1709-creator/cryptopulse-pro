@@ -670,42 +670,8 @@ async function showAuto(ctx: any, locale: 'en' | 'ar', edit = false): Promise<vo
   if (edit) await ctx.editMessageText(text, { reply_markup: nav(locale) }); else await ctx.reply(text, { reply_markup: nav(locale) });
 }
 
-async function configureTelegramDiscovery(bot: Bot): Promise<void> {
-  // Keep the public Telegram profile aligned with CryptoPulse's actual product surface.
-  // This is intentionally idempotent: every deployment can re-apply the same metadata.
-  try {
-    await Promise.all([
-      bot.api.setMyName({ name: 'CryptoPulse Pro — AI Crypto Signals' }),
-      bot.api.setMyShortDescription({
-        short_description: 'AI crypto signals, live market analysis, alerts and trading tools inside Telegram.',
-      }),
-      bot.api.setMyDescription({
-        description: 'CryptoPulse Pro is a Telegram crypto intelligence tool with live market data, AI-assisted crypto analysis, trading signals, alerts, risk tools and a Mini App. Use /markets for live prices, /signals for market signals, /trade for educational trade planning, /referral for the referral center, and /pro for Telegram Stars subscription.',
-      }),
-      bot.api.setMyCommands({
-        commands: [
-          { command: 'start', description: 'Start CryptoPulse Pro' },
-          { command: 'markets', description: 'Live crypto market prices' },
-          { command: 'signals', description: 'Crypto market signals' },
-          { command: 'trade', description: 'Educational trade planner' },
-          { command: 'auto', description: 'Open auto-trading tools' },
-          { command: 'portfolio', description: 'Open your portfolio' },
-          { command: 'referral', description: 'Referral & rewards center' },
-          { command: 'leaderboard', description: 'Global referral leaderboard' },
-          { command: 'pro', description: 'CryptoPulse Pro subscription' },
-        ],
-      }),
-    ]);
-    console.log('Telegram discovery metadata synchronized.');
-  } catch (error) {
-    // Metadata is non-critical. Never prevent the bot from starting if Telegram rejects it.
-    console.warn('Telegram discovery metadata sync skipped:', error);
-  }
-}
-
 export async function startBot(): Promise<void> {
   if (!config.botToken) throw new Error('TELEGRAM_BOT_TOKEN is required to start the bot.');
   const bot = createBot();
-  await configureTelegramDiscovery(bot);
   await bot.start({ onStart: (info) => console.log(`CryptoPulse Pro started as @${info.username}`) });
 }
