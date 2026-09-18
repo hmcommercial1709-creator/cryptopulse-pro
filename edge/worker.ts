@@ -26,14 +26,22 @@ function supabase(env: Env) {
 
 async function rpc(env: Env, fn: string, args: Record<string, unknown>): Promise<SupabaseRow[]> {
   const { base, headers } = supabase(env);
-  const response = await fetch(base.replace('/rest/v1/', '/rest/v1/rpc/') + fn, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(args),
-  });
-  if (!response.ok) throw new Error(`Supabase RPC ${fn} failed: ${response.status} ${await response.text()}`);
-  const body = await response.json();
-  return Array.isArray(body) ? body as SupabaseRow[] : [];
+  let lastDetail = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(base.replace('/rest/v1/', '/rest/v1/rpc/') + fn, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(args),
+    });
+    if (response.ok) {
+      const body = await response.json();
+      return Array.isArray(body) ? body as SupabaseRow[] : [];
+    }
+    lastDetail = await response.text();
+    if (response.status < 500 && response.status !== 429) break;
+    if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  throw new Error(`Supabase RPC ${fn} failed: ${lastDetail.slice(0, 1000)}`);
 }
 
 function updateKey(update: any): string {
