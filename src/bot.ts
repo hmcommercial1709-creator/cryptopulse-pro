@@ -108,7 +108,6 @@ async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<vo
 function menu(locale: 'en' | 'ar'): InlineKeyboard {
   const x = t(locale);
   const referralLabel = locale === 'ar' ? '🚨 💰 مركز الإحالات والمكافآت' : '🚨 💰 Referral Center';
-  const shareLabel = locale === 'ar' ? '📣 شارك رابطك واكسب Stars المؤهلة' : '📣 Share your link & earn eligible Stars';
   return new InlineKeyboard()
     .text(x.markets, 'markets').text('⚡ Signals', 'signals').row()
     .text(x.trade, 'trade').text('🤖 Auto Trade', 'auto').row()
@@ -118,8 +117,7 @@ function menu(locale: 'en' | 'ar'): InlineKeyboard {
     // The referral screen then exposes the authenticated Mini App WebApp button.
     .text(referralLabel, 'referral').row()
     .text(x.learn, 'learn').text(x.pro, 'pro').row()
-    .text(x.help, 'help').row()
-    .url(shareLabel, config.botUsername ? `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${config.botUsername}?start=ref_${'${'}0${'}'})}&text=${encodeURIComponent(locale === 'ar' ? '🚀 انضم إلى CryptoPulse عبر رابط الإحالة الخاص بي.' : '🚀 Join CryptoPulse using my referral link.')}` : 'https://t.me/');
+    .text(x.help, 'help');
 }
 
 function riskMenu(locale: 'en' | 'ar'): InlineKeyboard {
