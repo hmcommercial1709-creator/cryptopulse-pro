@@ -20,6 +20,7 @@ function supabase(env: Env) {
     apikey: env.SUPABASE_SERVICE_ROLE_KEY,
     Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY,
     'Content-Type': 'application/json',
+    Accept: 'application/json',
   };
   return { base, headers };
 }
@@ -137,14 +138,21 @@ async function processStarsPayment(env: Env, payload: any): Promise<void> {
 }
 
 async function telegram(env: Env, method: string, body: Record<string, unknown>): Promise<any> {
-  const response = await fetch('https://api.telegram.org/bot' + env.BOT_TOKEN + '/' + method, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok || data?.ok === false) throw new Error(`Telegram ${method} failed: ${JSON.stringify(data).slice(0, 1000)}`);
-  return data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch('https://api.telegram.org/bot' + env.BOT_TOKEN + '/' + method, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = await response.json();
+    if (!response.ok || data?.ok === false) throw new Error(`Telegram ${method} failed: ${JSON.stringify(data).slice(0, 1000)}`);
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function createBot(env: Env): Bot {
@@ -305,13 +313,21 @@ export default {
       }
 
       const update = await request.json();
-      const accepted = await acceptUpdate(env, update);
 
-      if (accepted) {
-        ctx.waitUntil(processJobs(env, 20).catch(error => console.error('Edge durable processing failed:', error)));
-      }
+      // Telegram only needs a fast 2xx acknowledgement. Never block the webhook
+      // response on Supabase, durable processing, or Telegram API calls.
+      ctx.waitUntil((async () => {
+        try {
+          const accepted = await acceptUpdate(env, update);
+          if (accepted) {
+            await processJobs(env, 20);
+          }
+        } catch (error) {
+          console.error('Edge durable processing failed:', error);
+        }
+      })());
 
-      return Response.json({ ok: true, accepted });
+      return Response.json({ ok: true });
     } catch (error) {
       console.error('Zero-Crash Edge Boundary:', error);
       return Response.json({ ok: true, accepted: false, recovered: true });
