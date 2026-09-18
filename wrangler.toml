@@ -1,0 +1,16 @@
+name = "cryptopulse-pro-edge"
+main = "edge/worker.ts"
+compatibility_date = "2026-09-18"
+
+[observability]
+enabled = true
+
+[triggers]
+crons = ["*/1 * * * *"]
+
+[vars]
+# Set secrets with:
+# wrangler secret put BOT_TOKEN
+# wrangler secret put TELEGRAM_WEBHOOK_SECRET
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# SUPABASE_URL and MINI_APP_URL may be configured as vars/secrets.
