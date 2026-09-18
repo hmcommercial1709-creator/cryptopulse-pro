@@ -14,7 +14,10 @@
     "pm2:start": "pm2 start ecosystem.config.cjs --env production",
     "pm2:save": "pm2 save",
     "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test src/__tests__/*.test.ts src/agents/*.test.ts"
+    "test": "node --import tsx --test src/__tests__/*.test.ts src/agents/*.test.ts",
+    "edge:dev": "npx wrangler dev --config wrangler.toml",
+    "edge:deploy": "npx wrangler deploy --config wrangler.toml",
+    "edge:types": "npx wrangler types --config wrangler.toml"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
