@@ -19,7 +19,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Market data is not configured.' }, { status: 503 });
   }
 
-  const url = `${CMC_URL}?id=${ASSETS.map((asset) => asset.id).join(',')}`;
+  const url = `${CMC_URL}?id=${ASSETS.map((asset) => asset.id).join(',')}&convert=USD`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
 
@@ -37,7 +37,9 @@ export async function GET() {
 
     const markets = ASSETS.map(({ id, symbol }) => {
       const item = body.data?.[String(id)];
-      const quote = item?.quote?.USD;
+      const quote = Array.isArray(item?.quote)
+        ? item.quote.find((entry: { symbol?: string }) => entry.symbol === 'USD')
+        : (item?.quote as unknown as { price?: number; percent_change_24h?: number; volume_24h?: number } | undefined);
       if (!quote || typeof quote.price !== 'number' || typeof quote.percent_change_24h !== 'number') {
         throw new Error(`Incomplete market data for ${symbol}.`);
       }
