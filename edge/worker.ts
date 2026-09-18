@@ -1,7 +1,13 @@
 import { Bot, InlineKeyboard } from 'grammy';
 
-interface ExecutionContextLike { waitUntil(promise: Promise<unknown>): void; }
-interface ScheduledControllerLike { cron: string; scheduledTime: number; }
+interface ExecutionContextLike {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+interface ScheduledControllerLike {
+  cron: string;
+  scheduledTime: number;
+}
 
 export interface Env {
   BOT_TOKEN: string;
@@ -12,385 +18,459 @@ export interface Env {
   MARKET_DATA_API_KEY?: string;
 }
 
-type SupabaseRow = Record<string, unknown>;
+let cachedBotToken = '';
+let cachedBot: Bot | undefined;
+let cachedBotInitPromise: Promise<Bot> | undefined;
 
-function supabase(env: Env) {
-  const rawUrl = String(
-    env?.SUPABASE_URL || 'https://vodxbdhlxqnmbajulpun.supabase.co'
-  ).trim();
+function getSupabase(env: Env) {
+  const url = String(env.SUPABASE_URL ?? '').trim();
+  const key = String(env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
 
-  const rawKey = String(
-    env?.SUPABASE_SERVICE_ROLE_KEY || ''
-  ).trim();
+  if (!url) throw new Error('Missing SUPABASE_URL Cloudflare Worker secret.');
+  if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY Cloudflare Worker secret.');
 
-  if (!rawKey) {
+  return {
+    base: url.replace(/\/+$/, '') + '/rest/v1/',
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+  };
+}
+
+async function supabaseRpc(
+  env: Env,
+  functionName: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const { base, headers } = getSupabase(env);
+  const response = await fetch(`${base}rpc/${functionName}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(args),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
     throw new Error(
-      'Missing Cloudflare Worker secret: SUPABASE_SERVICE_ROLE_KEY'
+      `Supabase RPC ${functionName} failed (${response.status}): ${text.slice(0, 1500)}`,
     );
   }
 
-  const base = rawUrl.replace(/\/$/, '') + '/rest/v1/';
-
-  const headers = {
-    apikey: rawKey,
-    Authorization: 'Bearer ' + rawKey,
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-
-  return { base, headers };
-}
-
-async function rpc(env: Env, fn: string, args: Record<string, unknown>): Promise<SupabaseRow[]> {
-  const { base, headers } = supabase(env);
-  let lastDetail = '';
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch(base.replace('/rest/v1/', '/rest/v1/rpc/') + fn, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(args),
-    });
-    if (response.ok) {
-      const body = await response.json();
-      return Array.isArray(body) ? body as SupabaseRow[] : [];
-    }
-    lastDetail = await response.text();
-    if (response.status < 500 && response.status !== 429) break;
-    if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 150));
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
-  throw new Error(`Supabase RPC ${fn} failed: ${lastDetail.slice(0, 1000)}`);
 }
 
-function updateKey(update: any): string {
-  if (Number.isInteger(update?.update_id)) return 'telegram:update:' + update.update_id;
-  const callbackId = update?.callback_query?.id;
-  if (callbackId) return 'telegram:callback:' + callbackId;
-  const chatId = update?.message?.chat?.id ?? update?.inline_query?.from?.id ?? 'unknown';
-  return 'telegram:fallback:' + String(chatId) + ':' + crypto.randomUUID();
-}
-
-async function acceptUpdate(env: Env, update: any): Promise<boolean> {
-  const key = updateKey(update);
-  const rows = await rpc(env, 'cp_edge_accept', {
-    p_idempotency_key: key,
-    p_operation: 'telegram_update',
-    p_actor_key: String(update?.message?.from?.id ?? update?.callback_query?.from?.id ?? ''),
-    p_job_type: 'telegram_update',
-    p_payload: update,
-    p_max_attempts: 8,
+async function claimTelegramUpdate(env: Env, updateId: number): Promise<boolean> {
+  const result = await supabaseRpc(env, 'cp_claim_telegram_update', {
+    p_update_id: updateId,
+    p_lease_seconds: 60,
   });
-  return rows[0]?.accepted === true;
+  return result === true;
 }
 
-
-async function acceptDurableJob(env: Env, key: string, operation: string, actorKey: string, jobType: string, payload: unknown): Promise<boolean> {
-  const rows = await rpc(env, 'cp_edge_accept', {
-    p_idempotency_key: key,
-    p_operation: operation,
-    p_actor_key: actorKey,
-    p_job_type: jobType,
-    p_payload: payload,
-    p_max_attempts: 8,
+async function completeTelegramUpdate(
+  env: Env,
+  updateId: number,
+  success: boolean,
+  error?: unknown,
+): Promise<void> {
+  await supabaseRpc(env, 'cp_complete_telegram_update', {
+    p_update_id: updateId,
+    p_success: success,
+    p_error: error instanceof Error ? error.message : error ? String(error) : null,
   });
-  return rows[0]?.accepted === true;
 }
 
-async function processReferralAttribution(env: Env, payload: any): Promise<void> {
-  const { base, headers } = supabase(env);
-  const userId = Number(payload.userId);
-  const referralPayload = String(payload.referralPayload ?? '');
-  if (!Number.isSafeInteger(userId) || userId <= 0 || !/^ref_[A-Za-z0-9_-]{1,64}$/.test(referralPayload)) return;
+type TelegramUpdate = {
+  update_id: number;
+  message?: {
+    chat?: { id?: number; type?: string };
+    from?: {
+      id?: number;
+      username?: string;
+      first_name?: string;
+      last_name?: string;
+      language_code?: string;
+    };
+    successful_payment?: Record<string, unknown>;
+  };
+  callback_query?: {
+    from?: {
+      id?: number;
+      username?: string;
+      first_name?: string;
+      last_name?: string;
+      language_code?: string;
+    };
+    message?: { chat?: { id?: number } };
+    data?: string;
+  };
+};
 
-  const token = referralPayload.slice(4);
-  const referrerQuery = /^\d+$/.test(token)
-    ? 'telegram_user_id=eq.' + encodeURIComponent(token)
-    : 'referral_code=eq.' + encodeURIComponent(token.toLowerCase());
+function getLocale(languageCode?: string): 'ar' | 'en' {
+  return languageCode?.toLowerCase().startsWith('ar') ? 'ar' : 'en';
+}
 
-  const [referrerRows, referredRows] = await Promise.all([
-    fetch(base + 'cp_users?' + referrerQuery + '&select=id,telegram_user_id&limit=1', { headers }).then(r => r.json()) as Promise<Array<{id:string;telegram_user_id:number}>>,
-    fetch(base + 'cp_users?telegram_user_id=eq.' + userId + '&select=id&limit=1', { headers }).then(r => r.json()) as Promise<Array<{id:string}>>
-  ]);
-  const referrer = referrerRows[0];
-  const referred = referredRows[0];
-  if (!referrer?.id || !referred?.id || referrer.id === referred.id || Number(referrer.telegram_user_id) === userId) return;
+function getActorId(update: TelegramUpdate): number | null {
+  const id = update.message?.from?.id ?? update.callback_query?.from?.id ?? null;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
-  await fetch(base + 'cp_referrals?on_conflict=referred_user_id', {
+async function upsertTelegramUser(env: Env, update: TelegramUpdate): Promise<string | null> {
+  const from = update.message?.from ?? update.callback_query?.from;
+  const telegramUserId = from?.id;
+  if (!Number.isSafeInteger(telegramUserId) || telegramUserId <= 0) return null;
+
+  const { base, headers } = getSupabase(env);
+  const response = await fetch(`${base}cp_users?on_conflict=telegram_user_id`, {
     method: 'POST',
-    headers: { ...headers, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    headers: {
+      ...headers,
+      Prefer: 'resolution=merge-duplicates,return=representation',
+    },
     body: JSON.stringify({
-      referrer_user_id: referrer.id,
-      referred_user_id: referred.id,
-      source: 'telegram_start_edge',
+      telegram_user_id: telegramUserId,
+      username: from?.username ?? null,
+      display_name: [from?.first_name, from?.last_name].filter(Boolean).join(' ') || null,
+      language: getLocale(from?.language_code),
+      updated_at: new Date().toISOString(),
     }),
   });
+
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`cp_users upsert failed (${response.status}): ${body.slice(0, 1500)}`);
+  }
+
+  try {
+    const rows = JSON.parse(body) as Array<{ id?: string }>;
+    return rows[0]?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
-async function processStarsPayment(env: Env, payload: any): Promise<void> {
-  const { base, headers } = supabase(env);
-  const payment = payload.payment;
-  const telegramUserId = Number(payload.telegramUserId);
+async function processReferral(
+  env: Env,
+  userId: number,
+  referralPayload: string,
+): Promise<void> {
+  if (
+    !Number.isSafeInteger(userId) ||
+    userId <= 0 ||
+    !/^ref_[A-Za-z0-9_-]{1,64}$/.test(referralPayload)
+  ) {
+    return;
+  }
+
+  const token = referralPayload.slice(4);
+  const { base, headers } = getSupabase(env);
+  const referrerQuery = /^\d+$/.test(token)
+    ? `telegram_user_id=eq.${encodeURIComponent(token)}`
+    : `referral_code=eq.${encodeURIComponent(token.toLowerCase())}`;
+
+  const [referrerResponse, referredResponse] = await Promise.all([
+    fetch(`${base}cp_users?${referrerQuery}&select=id,telegram_user_id&limit=1`, { headers }),
+    fetch(`${base}cp_users?telegram_user_id=eq.${userId}&select=id&limit=1`, { headers }),
+  ]);
+
+  if (!referrerResponse.ok || !referredResponse.ok) {
+    throw new Error('Referral lookup failed.');
+  }
+
+  const referrers = (await referrerResponse.json()) as Array<{
+    id: string;
+    telegram_user_id: number;
+  }>;
+  const referred = (await referredResponse.json()) as Array<{ id: string }>;
+
+  const referrer = referrers[0];
+  const referredUser = referred[0];
+
+  if (
+    !referrer?.id ||
+    !referredUser?.id ||
+    referrer.id === referredUser.id ||
+    Number(referrer.telegram_user_id) === userId
+  ) {
+    return;
+  }
+
+  const response = await fetch(`${base}cp_referrals?on_conflict=referred_user_id`, {
+    method: 'POST',
+    headers: {
+      ...headers,
+      Prefer: 'resolution=ignore-duplicates,return=minimal',
+    },
+    body: JSON.stringify({
+      referrer_user_id: referrer.id,
+      referred_user_id: referredUser.id,
+      source: 'telegram_start_direct',
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Referral insert failed (${response.status}): ${(await response.text()).slice(0, 1000)}`);
+  }
+}
+
+async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promise<void> {
+  const payment = update.message?.successful_payment;
+  const telegramUserId = update.message?.from?.id;
+
   if (!payment || !Number.isSafeInteger(telegramUserId) || telegramUserId <= 0) return;
 
-  const users = await fetch(base + 'cp_users?telegram_user_id=eq.' + telegramUserId + '&select=id&limit=1', { headers }).then(r => r.json()) as Array<{id:string}>;
+  const chargeId = String(payment.telegram_payment_charge_id ?? '');
+  const invoicePayload = String(payment.invoice_payload ?? '');
+  if (!chargeId || !invoicePayload) throw new Error('Invalid Telegram Stars payment payload.');
+
+  const { base, headers } = getSupabase(env);
+  const usersResponse = await fetch(
+    `${base}cp_users?telegram_user_id=eq.${telegramUserId}&select=id&limit=1`,
+    { headers },
+  );
+
+  if (!usersResponse.ok) {
+    throw new Error('Could not find Telegram user for Stars payment.');
+  }
+
+  const users = (await usersResponse.json()) as Array<{ id: string }>;
   const userId = users[0]?.id;
   if (!userId) throw new Error('Stars payment received before user registration.');
 
-  await fetch(base + 'cp_stars_payments?on_conflict=telegram_payment_charge_id', {
+  const response = await fetch(`${base}cp_stars_payments?on_conflict=telegram_payment_charge_id`, {
     method: 'POST',
-    headers: { ...headers, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    headers: {
+      ...headers,
+      Prefer: 'resolution=ignore-duplicates,return=minimal',
+    },
     body: JSON.stringify({
       user_id: userId,
       telegram_user_id: telegramUserId,
       plan: 'pro',
       amount_stars: Number(payment.total_amount ?? 0),
-      currency: payment.currency ?? 'XTR',
-      invoice_payload: payment.invoice_payload ?? null,
-      telegram_payment_charge_id: payment.telegram_payment_charge_id,
+      currency: String(payment.currency ?? 'XTR'),
+      invoice_payload: invoicePayload,
+      telegram_payment_charge_id: chargeId,
       provider_payment_charge_id: payment.provider_payment_charge_id ?? null,
       is_recurring: Boolean(payment.is_recurring),
       is_first_recurring: Boolean(payment.is_first_recurring),
     }),
   });
-}
 
-async function telegram(env: Env, method: string, body: Record<string, unknown>): Promise<any> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const response = await fetch('https://api.telegram.org/bot' + env.BOT_TOKEN + '/' + method, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    const data = await response.json();
-    if (!response.ok || data?.ok === false) throw new Error(`Telegram ${method} failed: ${JSON.stringify(data).slice(0, 1000)}`);
-    return data;
-  } finally {
-    clearTimeout(timeout);
+  if (!response.ok) {
+    throw new Error(`Stars payment insert failed (${response.status}): ${(await response.text()).slice(0, 1200)}`);
   }
 }
 
-let cachedBotInfo: any | undefined;
+async function getBot(env: Env): Promise<Bot> {
+  if (cachedBot && cachedBotToken === env.BOT_TOKEN) return cachedBot;
+  if (cachedBotInitPromise && cachedBotToken === env.BOT_TOKEN) return cachedBotInitPromise;
 
-async function createBot(env: Env): Promise<Bot> {
-  const bot = cachedBotInfo
-    ? new Bot(env.BOT_TOKEN, { botInfo: cachedBotInfo })
-    : new Bot(env.BOT_TOKEN);
+  cachedBotToken = env.BOT_TOKEN;
 
-  // grammY requires bot initialization before handleUpdate() can
-  // construct a fully usable context for API-backed handlers such as ctx.reply().
-  // This is especially important in serverless/Cloudflare Workers where
-  // the bot instance is recreated for background durable-job processing.
-  if (!bot.isInited()) {
+  cachedBotInitPromise = (async () => {
+    const bot = new Bot(env.BOT_TOKEN);
     await bot.init();
-    cachedBotInfo = bot.botInfo;
-  }
 
-  bot.use(async (ctx, next) => {
-    try {
+    bot.use(async (ctx, next) => {
       if (ctx.callbackQuery) {
-        await ctx.answerCallbackQuery().catch(() => {});
+        await ctx.answerCallbackQuery().catch(() => undefined);
       }
       await next();
-    } catch (error) {
-      console.error('Edge middleware update failure:', {
-        updateId: ctx.update.update_id,
-        error: error instanceof Error ? error.stack || error.message : String(error),
-      });
-
-      try {
-        if (ctx.chat?.id) {
-          await ctx.reply('⚠️ CryptoPulse recovered a temporary error. Please retry the action.');
-        }
-      } catch (fallbackError) {
-        console.error('Edge fallback response failed:', fallbackError);
-      }
-
-      // Do not silently swallow the original failure. processJobs() must
-      // receive it so the durable job can be retried/backed off correctly.
-      throw error;
-    }
-  });
-
-  bot.command('start', async (ctx) => {
-    const locale = ctx.from?.language_code === 'ar' ? 'ar' : 'en';
-    const payload = typeof ctx.match === 'string' ? ctx.match.trim().slice(0, 64).replace(/[^A-Za-z0-9_-]/g, '') : '';
-    const userId = ctx.from?.id;
-    const { base, headers } = supabase(env);
-
-    if (userId) {
-      await fetch(base + 'cp_users?on_conflict=telegram_user_id', {
-        method: 'POST',
-        headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify({
-          telegram_user_id: userId,
-          username: ctx.from?.username ?? null,
-          display_name: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || null,
-          language: locale,
-          updated_at: new Date().toISOString(),
-        }),
-      });
-    }
-
-    await ctx.reply(
-      locale === 'ar'
-        ? '🚀 CryptoPulse Pro\n\nEdge-native market intelligence داخل Telegram.\n\nطلبك يدخل مسارًا موزعًا مقاومًا للتكرار.'
-        : '🚀 CryptoPulse Pro\n\nEdge-native market intelligence inside Telegram.\n\nYour action enters a distributed idempotent execution path.',
-      {
-        reply_markup: new InlineKeyboard()
-          .text('📈 Markets', 'markets')
-          .text('⚡ Signals', 'signals')
-          .row()
-          .text('💰 Referral', 'referral')
-          .text('⭐ Pro', 'pro')
-          .row()
-          .webApp('📊 Open Mini App', (env.MINI_APP_URL ?? '').replace(/\/$/, '') + '/mini'),
-      },
-    );
-
-    if (payload && userId) {
-      const accepted = await acceptDurableJob(
-        env,
-        'referral:start:' + userId + ':' + payload,
-        'referral_attribution',
-        String(userId),
-        'referral_attribution',
-        { userId, referralPayload: payload },
-      );
-      if (accepted) {
-        ctx.api.sendMessage(userId, locale === 'ar' ? '🔗 تم تسجيل الإحالة وإدخالها في طابور المعالجة الموزع.' : '🔗 Referral recorded and placed into the distributed execution queue.').catch(() => {});
-      }
-    }
-  });
-
-  bot.callbackQuery('markets', async (ctx) => {
-    await ctx.editMessageText('📈 Markets\n\nLive provider aggregation is running at the Edge. Use the Mini App for the full market panel.');
-  });
-
-  bot.callbackQuery('signals', async (ctx) => {
-    await ctx.editMessageText('⚡ Signals\n\nCoinMarketCap + CoinGecko are queried in parallel with stale-cache fallback.');
-  });
-
-  bot.callbackQuery('referral', async (ctx) => {
-    const userId = ctx.from.id;
-    const link = env.MINI_APP_URL
-      ? env.MINI_APP_URL.replace(/\/$/, '') + '/mini/referral'
-      : 'https://t.me/';
-    await ctx.editMessageText('💰 Referral Center\n\nYour Telegram update is protected by distributed idempotency and durable execution.', {
-      reply_markup: new InlineKeyboard().url('📊 Open Referral Center', link),
     });
-  });
 
-  bot.callbackQuery('pro', async (ctx) => {
-    await ctx.editMessageText('⭐ Pro checkout is processed through the durable Stars/payment event path.');
-  });
+    bot.command('start', async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId) throw new Error('Telegram /start update has no user id.');
 
-  bot.on('message:successful_payment', async (ctx) => {
-    const payment = ctx.message.successful_payment;
-    const accepted = await acceptDurableJob(
-      env,
-      'stars:' + payment.telegram_payment_charge_id,
-      'stars_payment',
-      String(ctx.from.id),
-      'stars_payment',
-      { telegramUserId: ctx.from.id, payment },
-    );
-    if (accepted) await ctx.reply('⭐ Payment received and queued for durable processing.');
-    else await ctx.reply('⭐ Payment already accepted and is being processed safely.');
-  });
+      const payload =
+        typeof ctx.match === 'string'
+          ? ctx.match.trim().slice(0, 64).replace(/[^A-Za-z0-9_-]/g, '')
+          : '';
 
-  return bot;
+      await upsertTelegramUser(env, ctx.update as TelegramUpdate);
+
+      if (payload) {
+        await processReferral(env, userId, payload);
+      }
+
+      const keyboard = new InlineKeyboard()
+        .text('📈 Markets', 'markets')
+        .text('⚡ Signals', 'signals')
+        .row()
+        .text('💰 Referral', 'referral')
+        .text('⭐ Pro', 'pro');
+
+      if (env.MINI_APP_URL) {
+        keyboard.row().webApp(
+          '📊 Open Mini App',
+          `${env.MINI_APP_URL.replace(/\/$/, '')}/mini`,
+        );
+      }
+
+      const locale = getLocale(ctx.from?.language_code);
+      await ctx.reply(
+        locale === 'ar'
+          ? '🚀 CryptoPulse Pro\n\nمرحباً بك في CryptoPulse Pro.\n\nاختر الخدمة التي تريد استخدامها:'
+          : '🚀 CryptoPulse Pro\n\nWelcome to CryptoPulse Pro.\n\nChoose a service:',
+        { reply_markup: keyboard },
+      );
+    });
+
+    bot.callbackQuery('markets', async (ctx) => {
+      await ctx.editMessageText(
+        '📈 Markets\n\nMarket intelligence is available inside CryptoPulse Pro.',
+      );
+    });
+
+    bot.callbackQuery('signals', async (ctx) => {
+      await ctx.editMessageText(
+        '⚡ Signals\n\nCryptoPulse signal infrastructure is online.',
+      );
+    });
+
+    bot.callbackQuery('referral', async (ctx) => {
+      const url = env.MINI_APP_URL
+        ? `${env.MINI_APP_URL.replace(/\/$/, '')}/mini/referral`
+        : null;
+
+      await ctx.editMessageText(
+        '💰 Referral Center\n\nYour referral activity is protected against duplicate Telegram updates.',
+        url
+          ? { reply_markup: new InlineKeyboard().url('📊 Open Referral Center', url) }
+          : undefined,
+      );
+    });
+
+    bot.callbackQuery('pro', async (ctx) => {
+      await ctx.editMessageText(
+        '⭐ CryptoPulse Pro\n\nPro features are available through Telegram Stars.',
+      );
+    });
+
+    bot.on('message:successful_payment', async (ctx) => {
+      await processSuccessfulPayment(env, ctx.update as TelegramUpdate);
+      await ctx.reply('⭐ Payment received successfully.');
+    });
+
+    bot.catch((error) => {
+      throw error.error;
+    });
+
+    cachedBot = bot;
+    return bot;
+  })();
+
+  try {
+    return await cachedBotInitPromise;
+  } finally {
+    cachedBotInitPromise = undefined;
+  }
 }
 
-async function processJobs(env: Env, limit = 20): Promise<void> {
-  const jobs = await rpc(env, 'cp_claim_durable_jobs', { p_limit: limit, p_lease_seconds: 45 });
-  let bot: Bot | undefined;
+async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Promise<void> {
+  const bot = await getBot(env);
+  await bot.handleUpdate(update);
+}
 
-  for (const job of jobs) {
-    const id = String(job.id);
-    try {
-      if (job.job_type === 'telegram_update') {
-        bot ??= await createBot(env);
-        await bot.handleUpdate(job.payload);
-      } else if (job.job_type === 'referral_attribution') {
-        await processReferralAttribution(env, job.payload);
-      } else if (job.job_type === 'stars_payment') {
-        await processStarsPayment(env, job.payload);
-      } else {
-        throw new Error('Unknown durable job type: ' + String(job.job_type));
-      }
-      await rpc(env, 'cp_complete_durable_job', {
-        p_job_id: id,
-        p_success: true,
-        p_result: { processedAt: new Date().toISOString() },
-      });
-    } catch (error) {
-      const attempts = Number(job.attempts ?? 1);
-      const backoff = Math.min(3600, Math.max(2, 2 ** Math.min(attempts, 10)));
-      await rpc(env, 'cp_complete_durable_job', {
-        p_job_id: id,
-        p_success: false,
-        p_error: error instanceof Error ? error.message : String(error),
-        p_backoff_seconds: backoff,
-      }).catch((completionError) => console.error('Durable job completion failed:', completionError));
-    }
-  }
+function validateTelegramUpdate(value: unknown): value is TelegramUpdate {
+  if (!value || typeof value !== 'object') return false;
+  const update = value as Partial<TelegramUpdate>;
+  return Number.isSafeInteger(update.update_id) && Number(update.update_id) >= 0;
+}
+
+function webhookSecretMatches(request: Request, env: Env): boolean {
+  const configured = String(env.TELEGRAM_WEBHOOK_SECRET ?? '').trim();
+  if (!configured) return true;
+  return (
+    request.headers.get('x-telegram-bot-api-secret-token') ?? ''
+  ) === configured;
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    _ctx: ExecutionContextLike,
+  ): Promise<Response> {
     try {
       const url = new URL(request.url);
 
       if (url.pathname === '/health' || url.pathname === '/healthz') {
-        return Response.json({ ok: true, service: 'cryptopulse-edge', architecture: 'cloudflare-edge+supabase-durable' });
+        return Response.json({
+          ok: true,
+          service: 'cryptopulse-edge',
+          mode: 'direct-telegram-execution',
+          durableJobs: false,
+          timestamp: new Date().toISOString(),
+        });
       }
 
       if (request.method !== 'POST') {
-        return new Response('Method Not Allowed', { status: 405 });
+        return new Response('Method Not Allowed', {
+          status: 405,
+          headers: { Allow: 'POST' },
+        });
       }
 
-      const configuredWebhookSecret = String(env.TELEGRAM_WEBHOOK_SECRET ?? '').trim();
-      const receivedWebhookSecret = request.headers.get('x-telegram-bot-api-secret-token') ?? '';
-
-      if (configuredWebhookSecret && receivedWebhookSecret !== configuredWebhookSecret) {
-        console.warn('Telegram webhook rejected: secret token mismatch');
+      if (!webhookSecretMatches(request, env)) {
         return new Response('Unauthorized', { status: 401 });
       }
 
-      const update = await request.json();
+      let rawUpdate: unknown;
+      try {
+        rawUpdate = await request.json();
+      } catch {
+        return new Response('Bad Request', { status: 400 });
+      }
 
-      if (
-        !update ||
-        typeof update !== 'object' ||
-        !Number.isInteger((update as any).update_id)
-      ) {
-        console.warn('Telegram webhook received malformed update');
+      if (!validateTelegramUpdate(rawUpdate)) {
         return Response.json({ ok: true, accepted: false });
       }
 
-      // Telegram only needs a fast 2xx acknowledgement. Never block the webhook
-      // response on Supabase, durable processing, or Telegram API calls.
-      ctx.waitUntil((async () => {
-        try {
-          const accepted = await acceptUpdate(env, update);
-          if (accepted) {
-            await processJobs(env, 20);
-          }
-        } catch (error) {
-          console.error('Edge durable processing failed:', error);
-        }
-      })());
+      const update = rawUpdate as TelegramUpdate;
+      const claimed = await claimTelegramUpdate(env, update.update_id);
 
-      return Response.json({ ok: true });
+      if (!claimed) {
+        return Response.json({ ok: true, duplicate: true });
+      }
+
+      try {
+        await handleTelegramUpdate(env, update);
+        await completeTelegramUpdate(env, update.update_id, true);
+        return Response.json({ ok: true, processed: true });
+      } catch (error) {
+        try {
+          await completeTelegramUpdate(env, update.update_id, false, error);
+        } catch (completionError) {
+          console.error('Failed to record Telegram update failure:', completionError);
+        }
+        console.error('Telegram update failed:', {
+          updateId: update.update_id,
+          actorId: getActorId(update),
+          error,
+        });
+        return new Response('Internal Server Error', { status: 500 });
+      }
     } catch (error) {
-      console.error('Zero-Crash Edge Boundary:', error);
-      return Response.json({ ok: true, accepted: false, recovered: true });
+      console.error('CryptoPulse Edge boundary failure:', error);
+      return new Response('Internal Server Error', { status: 500 });
     }
   },
 
-  async scheduled(_controller: ScheduledControllerLike, env: Env, ctx: ExecutionContextLike): Promise<void> {
-    ctx.waitUntil(processJobs(env, 50).catch(error => console.error('Scheduled durable worker failed:', error)));
+  async scheduled(
+    _controller: ScheduledControllerLike,
+    _env: Env,
+    _ctx: ExecutionContextLike,
+  ): Promise<void> {
+    // No queue polling. Telegram webhook processing is direct and synchronous.
   },
 };
