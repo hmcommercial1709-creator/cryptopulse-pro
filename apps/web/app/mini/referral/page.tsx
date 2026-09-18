@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 type Reward={threshold:number;stars:number;status:string;qualifyingPaidUsers:number};
 type Commission={stars:number;paymentStars:number;status:string;createdAt:string};
+type Leader={rank:number;name:string;qualifyingPaidUsers:number;accruedStars:number;isYou:boolean;vipTitle:string};
 type Stats={
   referrals:number;
   activatedReferrals:number;
@@ -21,6 +22,8 @@ export default function ReferralPage():JSX.Element{
   const [stats,setStats]=useState<Stats>({referrals:0,activatedReferrals:0,sharedReferrals:0,paidNetworkUsers:0,networkUsers:0,accruedCommissionStars:0,levels:[]});
   const [rate,setRate]=useState(15);
   const [message,setMessage]=useState('');
+  const [leaderboard,setLeaderboard]=useState<Leader[]>([]);
+  const [leaderboardUpdated,setLeaderboardUpdated]=useState('');
 
   useEffect(()=>{
     const headers={'x-telegram-init-data':window.Telegram?.WebApp?.initData??''};
@@ -28,10 +31,13 @@ export default function ReferralPage():JSX.Element{
     void Promise.all([
       fetch('/api/referral',{headers}).then(r=>r.json()),
       fetch('/api/referral/stats',{headers}).then(r=>r.json()),
-      fetch('/api/referral/config',{headers}).then(r=>r.json()).catch(()=>({rate:15}))
-    ]).then(([link,data,cfg])=>{
+      fetch('/api/referral/config',{headers}).then(r=>r.json()).catch(()=>({rate:15})),
+      fetch('/api/referral/leaderboard',{headers}).then(r=>r.json()).catch(()=>({leaderboard:[]}))
+    ]).then(([link,data,cfg,board])=>{
       if(link.url)setUrl(link.url);
       setRate(Number(cfg.rate??15));
+      setLeaderboard(Array.isArray(board.leaderboard)?board.leaderboard:[]);
+      setLeaderboardUpdated(String(board.updatedAt??''));
       setStats({
         referrals:Number(data.referrals??0),
         activatedReferrals:Number(data.activatedReferrals??0),
@@ -102,6 +108,16 @@ export default function ReferralPage():JSX.Element{
     </div>
 
     <div style={card}>
+      <h2 style={h2}>👑 Global VIP Leaderboard</h2>
+      <p style={muted}>Live qualifying leaderboard. Only eligible paid referral activity is counted; reviewed or blocked commissions are excluded.</p>
+      {leaderboard.length===0 ? <p style={muted}>No qualifying paid activity yet.</p> : leaderboard.slice(0,25).map((r)=><div key={r.rank} style={row}>
+        <span><strong>#{r.rank}</strong> {r.vipTitle} · {r.name}</span>
+        <span>{r.qualifyingPaidUsers.toLocaleString()} paid · {r.accruedStars.toLocaleString()} ⭐</span>
+      </div>)}
+      {leaderboardUpdated&&<p style={fine}>Updated {new Date(leaderboardUpdated).toLocaleTimeString()}. Refreshes when this center is opened.</p>}
+    </div>
+
+    <div style={card}>
       <h2 style={h2}>💰 Commission activity</h2>
       {(stats.recentCommissions??[]).length===0
         ? <p style={muted}>No eligible commission has been recorded yet.</p>
@@ -116,7 +132,7 @@ export default function ReferralPage():JSX.Element{
       <ol style={list}>
         <li>Share your personal referral link responsibly.</li>
         <li>A referral is attributed once a new Telegram user enters through the valid referral start parameter.</li>
-        <li>Commission is accrued only from eligible Telegram Stars payments recorded by CryptoPulse.</li>
+        <li>Commission is accrued only from eligible Telegram Stars payments recorded by CryptoPulse and can be held for review when integrity checks detect unusual patterns.</li>
         <li>Unpaid signups, duplicate/self-referrals, refunds, fake accounts, manipulation and prohibited activity do not qualify.</li>
         <li>Accrued rewards are subject to verification and the configured payout process; accrued does not mean instantly paid.</li>
         <li>Telegram's native Mini App Affiliate Program is separate. Telegram documents its own affiliate commission system and referral links; CryptoPulse does not represent its internal ledger as a Telegram payout.</li>
