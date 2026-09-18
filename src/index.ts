@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createBot } from './bot.js';
-import { markNextWebReady, startWebServer } from './web.js';
+import { markNextWebReady, startWebServer, stopWebServer } from './web.js';
 
 const bot = createBot();
 await bot.init();
@@ -62,6 +62,12 @@ async function shutdown(signal: string): Promise<void> {
     await bot.stop();
   } catch (error) {
     console.error('Telegram bot shutdown failed:', error);
+  }
+
+  try {
+    await stopWebServer();
+  } catch (error) {
+    console.error('HTTP gateway shutdown failed:', error);
   }
 
   if (nextProcess.exitCode === null && !nextProcess.killed) {
