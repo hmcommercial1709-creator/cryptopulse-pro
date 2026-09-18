@@ -81,15 +81,24 @@ async function fetchCoinGecko(symbols: string[]): Promise<Map<string, MarketSnap
 async function fetchSources(symbols: string[]): Promise<Map<string, MarketSnapshot>> {
   const result = new Map<string, MarketSnapshot>();
   const errors: string[] = [];
-  for (const loader of [fetchCoinMarketCap, fetchCoinGecko]) {
-    try {
-      const rows = await loader(symbols);
-      for (const [symbol, value] of rows) if (!result.has(symbol)) result.set(symbol, value);
-      if (result.size === symbols.length) break;
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+
+  // Query providers concurrently. A dead/slow provider must never block a healthy one
+  // behind its full timeout. The first complete valid provider data wins per symbol.
+  const settled = await Promise.allSettled([
+    fetchCoinMarketCap(symbols),
+    fetchCoinGecko(symbols),
+  ]);
+
+  for (const item of settled) {
+    if (item.status === 'fulfilled') {
+      for (const [symbol, value] of item.value) {
+        if (!result.has(symbol)) result.set(symbol, value);
+      }
+    } else {
+      errors.push(item.reason instanceof Error ? item.reason.message : String(item.reason));
     }
   }
+
   if (!result.size) throw new Error(`All market providers failed: ${errors.join(' | ')}`);
   return result;
 }
