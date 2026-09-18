@@ -64,19 +64,23 @@ async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<vo
     });
     if (!response.ok) throw new Error(await response.text());
 
-    const refMatch = /^ref_([0-9]{1,20})$/.exec(referralPayload.trim());
+    const refMatch = /^ref_([A-Za-z0-9_-]{1,64})$/.exec(referralPayload.trim());
     if (!refMatch) return;
 
-    const referrerTelegramId = Number(refMatch[1]);
-    if (!Number.isSafeInteger(referrerTelegramId) || referrerTelegramId <= 0 || referrerTelegramId === telegramUser.id) return;
+    const referralToken = refMatch[1];
+    const referrerQuery = /^\\d+$/.test(referralToken)
+      ? 'telegram_user_id=eq.' + encodeURIComponent(referralToken)
+      : 'referral_code=eq.' + encodeURIComponent(referralToken.toLowerCase());
+    const referrerRows = await fetch(
+      supabase.base + 'cp_users?' + referrerQuery + '&select=id,telegram_user_id&limit=1',
+      { headers: supabase.headers },
+    ).then(r => r.json()) as Array<{ id: string; telegram_user_id: number }>;
+    const referrerId = referrerRows[0]?.id;
+    const referrerTelegramId = Number(referrerRows[0]?.telegram_user_id ?? 0);
+    if (!referrerId || !Number.isSafeInteger(referrerTelegramId) || referrerTelegramId <= 0 || referrerTelegramId === telegramUser.id) return;
 
-    const [referrerResponse, referredResponse] = await Promise.all([
-      fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + referrerTelegramId + '&select=id&limit=1', { headers: supabase.headers }),
-      fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + telegramUser.id + '&select=id&limit=1', { headers: supabase.headers }),
-    ]);
-    const referrers = await referrerResponse.json() as Array<{ id: string }>;
+    const referredResponse = await fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + telegramUser.id + '&select=id&limit=1', { headers: supabase.headers });
     const referred = await referredResponse.json() as Array<{ id: string }>;
-    const referrerId = referrers[0]?.id;
     const referredId = referred[0]?.id;
     if (!referrerId || !referredId || referrerId === referredId) return;
 
