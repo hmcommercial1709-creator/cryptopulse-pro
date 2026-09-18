@@ -1,36 +1,17 @@
 import type { MarketSnapshot } from './domain.js';
 import { config } from './config.js';
 
-const CMC_QUOTES_URL = 'https://pro-api.coinmarketcap.com/v3/cryptocurrency/quotes/latest';
+const CMC_URL = 'https://pro-api.coinmarketcap.com/v3/cryptocurrency/quotes/latest';
+const CG_URL = 'https://api.coingecko.com/api/v3/simple/price';
 const REQUEST_TIMEOUT_MS = 8_000;
 const CACHE_TTL_MS = 45_000;
+const STALE_CACHE_TTL_MS = 10 * 60_000;
 
-const coinIds: Record<string, number> = {
-  BTC: 1,
-  ETH: 1027,
-  SOL: 5426,
-};
+const coinIds: Record<string, number> = { BTC: 1, ETH: 1027, SOL: 5426 };
+const geckoIds: Record<string, string> = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana' };
 
-interface CmcQuote {
-  id: number;
-  name: string;
-  symbol: string;
-  quote?: {
-    USD?: {
-      price?: number;
-      volume_24h?: number;
-      percent_change_24h?: number;
-      last_updated?: string;
-    };
-  };
-}
-
-interface CmcResponse {
-  data?: Record<string, CmcQuote>;
-  status?: { error_code?: number; error_message?: string };
-}
-
-const cache = new Map<string, { value: MarketSnapshot; expiresAt: number }>();
+type Cached = { value: MarketSnapshot; freshUntil: number; staleUntil: number };
+const cache = new Map<string, Cached>();
 
 function normalizeSymbol(symbol: string): string {
   const normalized = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -38,96 +19,123 @@ function normalizeSymbol(symbol: string): string {
   return normalized;
 }
 
-function requestHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { accept: 'application/json' };
-  if (config.marketApiKey) headers['X-CMC_PRO_API_KEY'] = config.marketApiKey;
-  return headers;
-}
-
-function toSnapshot(requested: string, quote: CmcQuote | undefined): MarketSnapshot {
-  const usd = quote?.quote?.USD;
-  const price = Number(usd?.price);
-  const change24h = Number(usd?.percent_change_24h);
-  const volume24h = Number(usd?.volume_24h);
-  if (!Number.isFinite(price)) throw new Error(`CoinMarketCap returned no valid USD price for ${requested}`);
-
-  return {
-    symbol: quote?.symbol ?? requested,
-    price,
-    change24h: Number.isFinite(change24h) ? change24h : 0,
-    volume24h: Number.isFinite(volume24h) ? volume24h : 0,
-    updatedAt: usd?.last_updated ?? new Date().toISOString(),
-  };
-}
-
-async function fetchQuotes(symbols: string[]): Promise<Map<string, MarketSnapshot>> {
-  const normalized = [...new Set(symbols.map(normalizeSymbol))];
-  if (normalized.length === 0) return new Map();
-
-  const allKnown = normalized.every((symbol) => Boolean(coinIds[symbol]));
-  const params = new URLSearchParams({ convert: 'USD' });
-  if (allKnown) params.set('id', normalized.map((symbol) => coinIds[symbol]).join(','));
-  else params.set('symbol', normalized.join(','));
-
+async function fetchJson(url: string, init: RequestInit = {}): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${CMC_QUOTES_URL}?${params.toString()}`, {
-      headers: requestHeaders(),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`CoinMarketCap market data request failed: HTTP ${response.status}`);
-
-    const payload = (await response.json()) as CmcResponse;
-    if (payload.status?.error_code) {
-      throw new Error(`CoinMarketCap API error ${payload.status.error_code}: ${payload.status.error_message ?? 'Unknown error'}`);
-    }
-
-    const result = new Map<string, MarketSnapshot>();
-    for (const quote of Object.values(payload.data ?? {})) {
-      const snapshot = toSnapshot(quote.symbol, quote);
-      result.set(snapshot.symbol.toUpperCase(), snapshot);
-    }
-    return result;
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) throw new Error(`Market source HTTP ${response.status}`);
+    return await response.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
+function snapshot(symbol: string, price: unknown, change24h: unknown, volume24h: unknown, updatedAt?: unknown): MarketSnapshot {
+  const p = Number(price);
+  if (!Number.isFinite(p) || p <= 0) throw new Error(`Invalid live price for ${symbol}`);
+  const c = Number(change24h);
+  const v = Number(volume24h);
+  return {
+    symbol,
+    price: p,
+    change24h: Number.isFinite(c) ? c : 0,
+    volume24h: Number.isFinite(v) ? v : 0,
+    updatedAt: typeof updatedAt === 'string' ? updatedAt : new Date().toISOString(),
+  };
+}
+
+async function fetchCoinMarketCap(symbols: string[]): Promise<Map<string, MarketSnapshot>> {
+  if (!config.marketApiKey) throw new Error('CoinMarketCap API key is not configured');
+  const ids = symbols.filter(s => coinIds[s]).map(s => coinIds[s]).join(',');
+  if (!ids) throw new Error('No supported CoinMarketCap symbols requested');
+  const payload = await fetchJson(`${CMC_URL}?convert=USD&id=${ids}`, {
+    headers: { accept: 'application/json', 'X-CMC_PRO_API_KEY': config.marketApiKey },
+  });
+  if (payload.status?.error_code) throw new Error(`CoinMarketCap ${payload.status.error_code}: ${payload.status.error_message ?? 'API error'}`);
+  const result = new Map<string, MarketSnapshot>();
+  for (const quote of Object.values<any>(payload.data ?? {})) {
+    const s = normalizeSymbol(String(quote.symbol));
+    result.set(s, snapshot(s, quote.quote?.USD?.price, quote.quote?.USD?.percent_change_24h, quote.quote?.USD?.volume_24h, quote.quote?.USD?.last_updated));
+  }
+  return result;
+}
+
+async function fetchCoinGecko(symbols: string[]): Promise<Map<string, MarketSnapshot>> {
+  const supported = symbols.filter(s => geckoIds[s]);
+  if (!supported.length) throw new Error('No supported CoinGecko symbols requested');
+  const ids = supported.map(s => geckoIds[s]).join(',');
+  const payload = await fetchJson(`${CG_URL}?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true`, {
+    headers: { accept: 'application/json' },
+  });
+  const result = new Map<string, MarketSnapshot>();
+  for (const symbol of supported) {
+    const row = payload[geckoIds[symbol]];
+    if (!row) continue;
+    result.set(symbol, snapshot(symbol, row.usd, row.usd_24h_change, row.usd_24h_vol));
+  }
+  if (!result.size) throw new Error('CoinGecko returned no usable market data');
+  return result;
+}
+
+async function fetchSources(symbols: string[]): Promise<Map<string, MarketSnapshot>> {
+  const result = new Map<string, MarketSnapshot>();
+  const errors: string[] = [];
+  for (const loader of [fetchCoinMarketCap, fetchCoinGecko]) {
+    try {
+      const rows = await loader(symbols);
+      for (const [symbol, value] of rows) if (!result.has(symbol)) result.set(symbol, value);
+      if (result.size === symbols.length) break;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!result.size) throw new Error(`All market providers failed: ${errors.join(' | ')}`);
+  return result;
+}
+
 export async function getMarketSnapshots(symbols: string[]): Promise<MarketSnapshot[]> {
   const normalized = [...new Set(symbols.map(normalizeSymbol))];
-  if (normalized.length === 0) return [];
-
+  if (!normalized.length) return [];
   const now = Date.now();
   const result = new Map<string, MarketSnapshot>();
   const missing: string[] = [];
 
   for (const symbol of normalized) {
     const cached = cache.get(symbol);
-    if (cached && cached.expiresAt > now) result.set(symbol, cached.value);
+    if (cached && cached.freshUntil > now) result.set(symbol, cached.value);
     else missing.push(symbol);
   }
 
-  if (missing.length > 0) {
-    const fetched = await fetchQuotes(missing);
-    for (const symbol of missing) {
-      const snapshot = fetched.get(symbol);
-      if (!snapshot) throw new Error(`CoinMarketCap returned no quote for ${symbol}`);
-      cache.set(symbol, { value: snapshot, expiresAt: now + CACHE_TTL_MS });
-      result.set(symbol, snapshot);
+  if (missing.length) {
+    try {
+      const fetched = await fetchSources(missing);
+      for (const symbol of missing) {
+        const value = fetched.get(symbol);
+        if (!value) continue;
+        cache.set(symbol, { value, freshUntil: now + CACHE_TTL_MS, staleUntil: now + STALE_CACHE_TTL_MS });
+        result.set(symbol, value);
+      }
+    } catch (error) {
+      console.error('Live market providers failed:', error);
     }
   }
 
-  return normalized.map((symbol) => {
-    const snapshot = result.get(symbol);
-    if (!snapshot) throw new Error(`Market snapshot missing for ${symbol}`);
-    return snapshot;
-  });
+  const unresolved: string[] = [];
+  for (const symbol of normalized) {
+    if (result.has(symbol)) continue;
+    const cached = cache.get(symbol);
+    if (cached && cached.staleUntil > now) result.set(symbol, cached.value);
+    else unresolved.push(symbol);
+  }
+
+  if (unresolved.length) {
+    throw new Error(`No live or recently cached market data available for: ${unresolved.join(', ')}`);
+  }
+  return normalized.map(symbol => result.get(symbol)!);
 }
 
 export async function getMarketSnapshot(symbol: string): Promise<MarketSnapshot> {
-  const snapshots = await getMarketSnapshots([symbol]);
-  const snapshot = snapshots[0];
-  if (!snapshot) throw new Error(`Market snapshot missing for ${symbol}`);
-  return snapshot;
+  const rows = await getMarketSnapshots([symbol]);
+  return rows[0]!;
 }
