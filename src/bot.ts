@@ -302,20 +302,53 @@ export function createBot(): Bot {
     await ctx.answerInlineQuery(results, { cache_time: 5, is_personal: true });
   });
 
-  bot.callbackQuery('markets', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await editMarkets(ctx, locale); });
-  bot.callbackQuery('signals', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showSignals(ctx, locale, true); });
-  bot.callbackQuery('auto', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showAuto(ctx, locale, true); });
-  bot.callbackQuery('portfolio', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) }); });
-  bot.callbackQuery('referral', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showReferral(ctx, locale, true); });
-  bot.callbackQuery('leaderboard', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showLeaderboard(ctx, locale, true); });
-  bot.callbackQuery('risk-tool', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '🧮 حاسبة الصفقة\n\nاختر مستوى المخاطرة لإنشاء خطة مبنية على سعر BTC المباشر.' : '🧮 Trade Calculator\n\nChoose a risk level to generate a plan using the live BTC price.', { reply_markup: riskMenu(locale) }); });
-  bot.callbackQuery('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
+  // Always acknowledge Telegram callback queries and recover visibly if an API/data call fails.
+  async function acknowledge(ctx: any): Promise<void> {
+    try { await ctx.answerCallbackQuery(); } catch (error) { console.warn('Callback acknowledgement failed:', error); }
+  }
 
-  bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).learnText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).alertsText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showPro(ctx, locale, true); });
-  bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).helpText, { reply_markup: nav(locale) }); });
-  bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).start, { reply_markup: menu(locale) }); });
+  async function safeEdit(ctx: any, text: string, replyMarkup?: InlineKeyboard): Promise<void> {
+    try {
+      await ctx.editMessageText(text, replyMarkup ? { reply_markup: replyMarkup } : undefined);
+    } catch (error) {
+      console.error('Callback message edit failed:', error);
+      try {
+        await ctx.reply(text, replyMarkup ? { reply_markup: replyMarkup } : undefined);
+      } catch (replyError) {
+        console.error('Callback fallback reply failed:', replyError);
+      }
+    }
+  }
+
+  bot.callbackQuery('markets', async (ctx) => {
+    const locale = getLocale(ctx.from?.language_code);
+    await acknowledge(ctx);
+    try { await editMarkets(ctx, locale); }
+    catch (error) {
+      console.error('Markets callback failed:', error);
+      await safeEdit(ctx, locale === 'ar' ? '⚠️ تعذر جلب بيانات السوق الآن. حاول مرة أخرى بعد لحظات.' : '⚠️ Market data is temporarily unavailable. Please try again.', nav(locale));
+    }
+  });
+  bot.callbackQuery('signals', async (ctx) => {
+    const locale = getLocale(ctx.from?.language_code);
+    await acknowledge(ctx);
+    try { await showSignals(ctx, locale, true); }
+    catch (error) {
+      console.error('Signals callback failed:', error);
+      await safeEdit(ctx, locale === 'ar' ? '⚠️ تعذر جلب الإشارات الآن. حاول مرة أخرى.' : '⚠️ Signals are temporarily unavailable. Please try again.', nav(locale));
+    }
+  });
+  bot.callbackQuery('auto', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, locale === 'ar' ? '🤖 التداول الآلي\\n\\nالتنفيذ الآلي يتم داخل Mini App بعد توثيق مستخدم Telegram وربط حسابه الخاص.' : '🤖 Auto Trading\\n\\nAutomated execution runs inside the Mini App after Telegram verification and user-specific exchange connection.', nav(locale)); });
+  bot.callbackQuery('portfolio', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', nav(locale)); });
+  bot.callbackQuery('referral', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); try { await showReferral(ctx, locale, true); } catch (error) { console.error('Referral callback failed:', error); await safeEdit(ctx, locale === 'ar' ? '⚠️ تعذر تحميل مركز الإحالات.' : '⚠️ Referral Center is temporarily unavailable.', nav(locale)); } });
+  bot.callbackQuery('leaderboard', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); try { await showLeaderboard(ctx, locale, true); } catch (error) { console.error('Leaderboard callback failed:', error); await safeEdit(ctx, locale, locale === 'ar' ? '⚠️ تعذر تحميل لوحة المتصدرين.' : '⚠️ Leaderboard is temporarily unavailable.'); } });
+  bot.callbackQuery('risk-tool', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, locale === 'ar' ? '🧮 حاسبة الصفقة\\n\\nاختر مستوى المخاطرة لإنشاء خطة مبنية على سعر BTC المباشر.' : '🧮 Trade Calculator\\n\\nChoose a risk level to generate a plan using the live BTC price.', riskMenu(locale)); });
+  bot.callbackQuery('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).tradeIntro, riskMenu(locale)); });
+  bot.callbackQuery('learn', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).learnText, nav(locale)); });
+  bot.callbackQuery('alerts', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).alertsText, nav(locale)); });
+  bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); try { await showPro(ctx, locale, true); } catch (error) { console.error('Pro callback failed:', error); await safeEdit(ctx, locale === 'ar' ? '⭐ تعذر فتح Pro الآن.' : '⭐ Pro is temporarily unavailable.', nav(locale)); } });
+  bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).helpText, nav(locale)); });
+  bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).start, menu(locale)); });
   bot.on('callback_query:data', async (ctx) => {
     const match = /^risk:(low|medium|high)$/.exec(ctx.callbackQuery.data);
     if (!match) return;
