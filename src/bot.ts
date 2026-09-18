@@ -143,8 +143,8 @@ export function createBot(): Bot {
     await ensureTelegramUser(ctx, payload);
     const source = payload || 'direct';
     const intro = locale === 'ar'
-      ? `🚀 CryptoPulse Pro\n\nالسوق والتحليلات والتنبيهات وأدوات التداول مباشرة داخل Telegram.\n\n⭐ Pro: 299 Stars / 30 يومًا.\n🚨 برنامج الإحالات: ابنِ مجموعتك، والاحتساب يكون على المستخدمين المدفوعين المؤهلين فقط.\n🏆 مكافآت النمو تبدأ من 1,000 مدفوع وتصل إلى مستويات أعلى وفق قواعد البرنامج.\n\nمصدر الدخول: ${source}`
-      : `🚀 CryptoPulse Pro\n\nLive markets, intelligence, alerts and trading tools directly inside Telegram.\n\n⭐ Pro: 299 Stars / 30 days.\n🚨 Referral growth: build your own group; only eligible paid users count.\n🏆 Growth Rewards start at 1,000 paid users and scale to higher milestones under the program rules.\n\nEntry source: ${source}`;
+      ? `🚀 CryptoPulse Pro\n\nالسوق والتحليلات والتنبيهات وأدوات التداول مباشرة داخل Telegram.\n\n⭐ Pro: 299 Stars / 30 يومًا.\n🚨 برنامج الإحالات: ابنِ مجموعتك، والاحتساب يكون على المستخدمين المدفوعين المؤهلين فقط.\n🏆 مكافآت النمو تبدأ من 10 مستخدمين مدفوعين وتتصاعد عبر مستويات قابلة للتهيئة وفق قواعد البرنامج.\n\nمصدر الدخول: ${source}`
+      : `🚀 CryptoPulse Pro\n\nLive markets, intelligence, alerts and trading tools directly inside Telegram.\n\n⭐ Pro: 299 Stars / 30 days.\n🚨 Referral growth: build your own group; only eligible paid users count.\n🏆 Growth Rewards start at 10 paid users and scale through configurable milestones under the program rules.\n\nEntry source: ${source}`;
     await ctx.reply(intro, { reply_markup: menu(locale) });
   });
 
@@ -170,13 +170,33 @@ export function createBot(): Bot {
       if (!userId) throw new Error('Payment received for an unregistered CryptoPulse user.');
       const referrals = await fetch(base + 'cp_referrals?referred_user_id=eq.' + userId + '&select=referrer_user_id&limit=1', { headers: h }).then(r => r.json()) as Array<{ referrer_user_id: string }>;
       const referrerId = referrals[0]?.referrer_user_id ?? null;
-      await fetch(base + 'cp_stars_payments', { method:'POST', headers:{...h,'Content-Type':'application/json',Prefer:'resolution=ignore-duplicates'}, body:JSON.stringify({
+      const paymentInsert = await fetch(base + 'cp_stars_payments', { method:'POST', headers:{...h,'Content-Type':'application/json',Prefer:'resolution=ignore-duplicates,return=representation'}, body:JSON.stringify({
         user_id:userId, telegram_user_id:telegramUserId, plan:'pro', amount_stars:payment.total_amount, currency:payment.currency,
         invoice_payload:payment.invoice_payload, telegram_payment_charge_id:payment.telegram_payment_charge_id,
         provider_payment_charge_id:payment.provider_payment_charge_id ?? null,
         subscription_expiration_date:payment.subscription_expiration_date ? new Date(payment.subscription_expiration_date * 1000).toISOString() : null,
         is_recurring:Boolean(payment.is_recurring), is_first_recurring:Boolean(payment.is_first_recurring), direct_referrer_user_id:referrerId
       })});
+      const paymentRows = await paymentInsert.json() as Array<{id:string}>;
+      const paymentId = paymentRows[0]?.id;
+      if (paymentId && referrerId && payment.currency === 'XTR') {
+        const cfgRows = await fetch(base + 'cp_referral_program_config?id=eq.true&select=telegram_commission_permille&limit=1', { headers: h }).then(r => r.json()) as Array<{telegram_commission_permille:number}>;
+        const commissionPermille = Math.max(0, Math.min(1000, Number(cfgRows[0]?.telegram_commission_permille ?? 150)));
+        const commissionStars = Math.floor(Number(payment.total_amount) * commissionPermille / 1000);
+        await fetch(base + 'cp_referral_commissions?on_conflict=payment_id', {
+          method:'POST',
+          headers:{...h,'Content-Type':'application/json',Prefer:'resolution=ignore-duplicates'},
+          body:JSON.stringify({
+            referrer_user_id:referrerId,
+            referred_user_id:userId,
+            payment_id:paymentId,
+            payment_stars:payment.total_amount,
+            commission_permille:commissionPermille,
+            commission_stars:commissionStars,
+            status:'accrued'
+          })
+        });
+      }
       const startsAt=new Date().toISOString();
       const expiresAt=payment.subscription_expiration_date ? new Date(payment.subscription_expiration_date * 1000).toISOString() : new Date(Date.now()+30*24*60*60*1000).toISOString();
       await fetch(base+'cp_subscriptions?on_conflict=user_id,plan',{method:'POST',headers:{...h,'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({
@@ -310,10 +330,37 @@ async function showReferral(ctx: any, locale: 'en' | 'ar', edit = false): Promis
     return;
   }
 
-  const referralUrl = `https://t.me/${config.botUsername}?startapp=ref_${userId}`;
+  const referralUrl = `https://t.me/${config.botUsername}?start=ref_${userId}`;
+  const supabase = supabaseAdminConfig();
+  let directReferrals = 0;
+  let accruedStars = 0;
+  let ratePercent = 15;
+  let levels: Array<{threshold:number; reward:number}> = [];
+  if (supabase) {
+    try {
+      const users = await fetch(supabase.base + 'cp_users?telegram_user_id=eq.' + userId + '&select=id&limit=1', {headers:supabase.headers}).then(r=>r.json()) as Array<{id:string}>;
+      const dbId = users[0]?.id;
+      if (dbId) {
+        const [refs, commissions, cfg, rewardLevels] = await Promise.all([
+          fetch(supabase.base + 'cp_referrals?referrer_user_id=eq.' + encodeURIComponent(dbId) + '&select=id&limit=1000', {headers:supabase.headers}).then(r=>r.json()),
+          fetch(supabase.base + 'cp_referral_commissions?referrer_user_id=eq.' + encodeURIComponent(dbId) + '&status=neq.reversed&select=commission_stars&limit=10000', {headers:supabase.headers}).then(r=>r.json()),
+          fetch(supabase.base + 'cp_referral_program_config?id=eq.true&select=telegram_commission_permille&limit=1', {headers:supabase.headers}).then(r=>r.json()),
+          fetch(supabase.base + 'cp_referral_reward_levels?select=paid_users_threshold,reward_stars&order=paid_users_threshold.asc&limit=100', {headers:supabase.headers}).then(r=>r.json())
+        ]);
+        directReferrals = Array.isArray(refs) ? refs.length : 0;
+        accruedStars = Array.isArray(commissions) ? commissions.reduce((sum,row) => sum + Number(row.commission_stars ?? 0), 0) : 0;
+        ratePercent = Number(cfg?.[0]?.telegram_commission_permille ?? 150) / 10;
+        levels = Array.isArray(rewardLevels) ? rewardLevels.map(row => ({threshold:Number(row.paid_users_threshold), reward:Number(row.reward_stars)})) : [];
+      }
+    } catch (error) {
+      console.warn('Referral summary unavailable:', error);
+    }
+  }
+  const levelTextAr = levels.length ? levels.map(l => `• ${l.threshold.toLocaleString()} مدفوع = ${l.reward.toLocaleString()} ⭐`).join('\n') : '• مستويات المكافآت قابلة للتهيئة';
+  const levelTextEn = levels.length ? levels.map(l => `• ${l.threshold.toLocaleString()} paid = ${l.reward.toLocaleString()} ⭐`).join('\n') : '• Reward milestones are configurable';
   const text = locale === 'ar'
-    ? `🚨 💰 كنز الإحالات - CryptoPulse Pro\n\n⭐ Pro = 299 Telegram Stars / 30 يومًا.\n\n🚀 ابنِ مجموعتك: كل مستخدم مدفوع مؤهل في شبكة الإحالة يمكن أن يساهم في تقدمك نحو مكافآت النمو.\n\n🔥 لماذا تشارك الآن؟\n• ⚡ ابنِ شبكتك الخاصة من مستخدمي CryptoPulse.\n• 📈 تابع نمو إحالاتك ونشاطها من مركز الإحالات.\n• 🚀 مشاركة واحدة قد تفتح لك سلسلة إحالات جديدة.\n\n🔗 رابط دعوتك الشخصي:\n${referralUrl}\n\n💸 برنامج Telegram Affiliate المستهدف: 15% عمولة مباشرة على المعاملات المؤهلة وفق شروط Telegram.\n\n🏆 مكافآت CryptoPulse: 1,000 مدفوع = 500 Stars، 10,000 = 10,000 Stars، 100,000 = 100,000 Stars، 1,000,000 = 1,000,000 Stars، 10,000,000 = 10,000,000 Stars، 100,000,000 = 100,000,000 Stars.\n\n⚡ لا يُحتسب أي شخص غير مدفوع، والمكافآت تخضع للتحقق ومكافحة الاحتيال وقواعد البرنامج.\n\n📊 افتح مركز الإحالات في Mini App لمتابعة الإحالات المسجلة والنشاط.`
-    : `🚨 💰 Referral Rewards - CryptoPulse Pro\n\n🚀 Do not miss the growth opportunity. Share your personal link with friends and Telegram communities; every new user entering through your link is recorded as your referral.\n\n🔥 Why share now?\n• ⚡ Build your own CryptoPulse referral network.\n• 📈 Track referral growth and activity from the Referral Center.\n• 🚀 One share can open the door to more referrals.\n\n🔗 Your personal referral link:\n${referralUrl}\n\n💸 Target Telegram Affiliate rate: 15% direct commission on eligible transactions under Telegram rules.\n\n🏆 CryptoPulse Growth Rewards: 1,000 paid users = 500 Stars, 10,000 = 10,000 Stars, 100,000 = 100,000 Stars, 1,000,000 = 1,000,000 Stars, 10,000,000 = 10,000,000 Stars, 100,000,000 = 100,000,000 Stars.\n\n⚡ Unpaid users never count. Rewards require verification and anti-fraud checks.\n\n📊 Open the Mini App Referral Center to track recorded referrals and activity.`;
+    ? `🚨 💰 مركز الإحالات والمكافآت — CryptoPulse Pro\n\n⭐ Pro = 299 Telegram Stars / 30 يومًا.\n\n🔗 رابط دعوتك الشخصي:\n${referralUrl}\n\n📊 إحالاتك المباشرة: ${directReferrals.toLocaleString()}\n💰 العمولة المتراكمة: ${accruedStars.toLocaleString()} ⭐\n🔥 معدل البرنامج الحالي: ${ratePercent}% من معاملات Stars المؤهلة والمسجلة في CryptoPulse.\n\n🏆 مستويات النمو:\n${levelTextAr}\n\n⚡ كيف تعمل؟ شارك الرابط، يدخل المستخدم عبره، ثم تُسجّل عمليات Pro المؤهلة في Stars. الإحالات غير المدفوعة لا تولّد عمولة.\n\n🛡️ مكافحة الاحتيال: الحسابات الوهمية، التلاعب، الاستردادات والنشاط المخالف قد يُستبعد.\n\n📌 هذا سجل مكافآت CryptoPulse الداخلي. برنامج Telegram Affiliate الأصلي للـMini App نظام منفصل تديره Telegram وفق إعداداته وشروطه.\n\n📊 افتح مركز الإحالات في Mini App لمتابعة الإحصاءات والحالة.`
+    : `🚨 💰 Referral & Rewards Center — CryptoPulse Pro\n\n⭐ Pro = 299 Telegram Stars / 30 days.\n\n🔗 Your personal referral link:\n${referralUrl}\n\n📊 Direct referrals: ${directReferrals.toLocaleString()}\n💰 Accrued commission: ${accruedStars.toLocaleString()} ⭐\n🔥 Current program rate: ${ratePercent}% of eligible Stars transactions recorded by CryptoPulse.\n\n🏆 Growth milestones:\n${levelTextEn}\n\n⚡ How it works: share your link, the user enters through it, and eligible Pro Stars payments are recorded. Unpaid referrals do not generate commission.\n\n🛡️ Anti-fraud: fake accounts, manipulation, refunds and prohibited activity may be excluded.\n\n📌 This is CryptoPulse's internal rewards ledger. Telegram's native Mini App Affiliate Program is separate and governed by Telegram's own configuration and terms.\n\n📊 Open the Mini App Referral Center for live stats and reward status.`;
 
   const keyboard = referralMenu(locale, userId);
   if (edit) await ctx.editMessageText(text, { reply_markup: keyboard }); else await ctx.reply(text, { reply_markup: keyboard });
