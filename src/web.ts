@@ -117,3 +117,14 @@ export function startWebServer(bot: Bot): void {
     console.log(`CryptoPulse HTTP gateway listening on http://${HOST}:${PORT}; Mini App upstream port ${NEXT_PORT}`);
   });
 }
+
+export async function stopWebServer(): Promise<void> {
+  markNextWebReady(false);
+  await new Promise<void>((resolve, reject) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
