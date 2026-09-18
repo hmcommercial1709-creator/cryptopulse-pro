@@ -11,6 +11,7 @@ if (!publicUrl) throw new Error('WEBHOOK_URL or RAILWAY_PUBLIC_DOMAIN is require
 const webhookUrl = new URL('/telegram/webhook', publicUrl).toString();
 const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
 const nextPort = Number(process.env.NEXT_PORT ?? 3000);
+const miniAppPath = process.env.MINI_APP_PATH ?? '/mini';
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const nextProcess = spawn(npmCommand, ['--prefix', 'apps/web', 'start'], {
@@ -32,7 +33,7 @@ nextProcess.on('exit', (code, signal) => {
 startWebServer(bot);
 
 async function waitForMiniApp(): Promise<void> {
-  const healthUrl = `http://127.0.0.1:${nextPort}/mini`;
+  const healthUrl = `http://127.0.0.1:${nextPort}${miniAppPath}`;
   for (let attempt = 1; attempt <= 60; attempt += 1) {
     try {
       const response = await fetch(healthUrl, { redirect: 'manual' });
