@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm --prefix apps/web install --no-audit --no-fund && npm --prefix apps/web run build",
     "start": "node dist/index.js",
     "worker": "node dist/automation/production-worker.js",
     "momentum:worker": "node dist/automation/momentum-worker.js",
