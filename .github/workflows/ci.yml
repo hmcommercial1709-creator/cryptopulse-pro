@@ -13,17 +13,40 @@ concurrency:
   group: cryptopulse-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: "22"
+  WRANGLER_VERSION: "4.134.0"
+
 jobs:
-  bot:
+  validate:
+    name: Validate Bot + Edge + Mini App
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-      - run: npm install
-      - run: npm run check
-      - run: npm run build
-      - run: npm test
-      - run: npx wrangler deploy --dry-run --config wrangler.toml
-      - run: npm --prefix apps/web run build:edge
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install root dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck bot
+        run: npm run check
+
+      - name: Test bot
+        run: npm test
+
+      - name: Validate Edge Worker
+        run: npx wrangler@${{ env.WRANGLER_VERSION }} deploy --dry-run --config wrangler.toml
+
+      - name: Install Mini App dependencies
+        working-directory: apps/web
+        run: npm install --no-audit --no-fund
+
+      - name: Build Mini App for Cloudflare
+        working-directory: apps/web
+        run: npm run build:edge
