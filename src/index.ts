@@ -5,10 +5,9 @@ import { markNextWebReady, startWebServer, stopWebServer } from './web.js';
 const bot = createBot();
 await bot.init();
 console.log(`CryptoPulse bot initialized as @${bot.botInfo.username} (id=${bot.botInfo.id})`);
-const publicUrl = process.env.WEBHOOK_URL
-  ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined);
+const publicUrl = process.env.WEBHOOK_URL;
 
-if (!publicUrl) throw new Error('WEBHOOK_URL or RAILWAY_PUBLIC_DOMAIN is required for Telegram webhook mode.');
+if (!publicUrl) throw new Error('WEBHOOK_URL is required for Telegram webhook mode.');
 
 const webhookUrl = new URL('/telegram/webhook', publicUrl).toString();
 const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
