@@ -122,6 +122,7 @@ function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
   }
   return keyboard
     .row().text(locale === 'ar' ? '📊 مركز الإحالات في Mini App' : '📊 Open Mini App Referral Center', 'referral')
+    .row().text(locale === 'ar' ? '👑 لوحة المتصدرين العالمية' : '👑 Global Leaderboard', 'leaderboard')
     .row().text(locale === 'ar' ? '⬅️ الرئيسية' : '⬅️ Home', 'home');
 }
 
@@ -157,6 +158,7 @@ export function createBot(): Bot {
     await ctx.reply(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) });
   });
   bot.command('referral', async (ctx) => showReferral(ctx, getLocale(ctx.from?.language_code)));
+  bot.command('leaderboard', async (ctx) => showLeaderboard(ctx, getLocale(ctx.from?.language_code)));
   bot.command('pro', async (ctx) => showPro(ctx, getLocale(ctx.from?.language_code)));
   bot.on('message:successful_payment', async (ctx) => {
     try {
@@ -257,6 +259,7 @@ export function createBot(): Bot {
       { command: 'auto', description: locale === 'ar' ? 'التداول الآلي' : 'Automated trading' },
       { command: 'portfolio', description: locale === 'ar' ? 'المحفظة' : 'Portfolio' },
       { command: 'referral', description: locale === 'ar' ? 'كنز الإحالات ومشاركة الرابط' : 'Referral rewards and sharing' },
+      { command: 'leaderboard', description: locale === 'ar' ? 'لوحة المتصدرين العالمية' : 'Global referral leaderboard' },
       { command: 'pro', description: locale === 'ar' ? 'اشتراك Pro عبر Stars' : 'Subscribe to Pro with Stars' },
       { command: 'alerts', description: locale === 'ar' ? 'تنبيهات العملات' : 'Crypto alerts' },
       { command: 'learn', description: locale === 'ar' ? 'تعلم التداول' : 'Learn crypto trading' },
@@ -300,6 +303,7 @@ export function createBot(): Bot {
   bot.callbackQuery('auto', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showAuto(ctx, locale, true); });
   bot.callbackQuery('portfolio', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) }); });
   bot.callbackQuery('referral', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showReferral(ctx, locale, true); });
+  bot.callbackQuery('leaderboard', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await showLeaderboard(ctx, locale, true); });
   bot.callbackQuery('risk-tool', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(locale === 'ar' ? '🧮 حاسبة الصفقة\n\nاختر مستوى المخاطرة لإنشاء خطة مبنية على سعر BTC المباشر.' : '🧮 Trade Calculator\n\nChoose a risk level to generate a plan using the live BTC price.', { reply_markup: riskMenu(locale) }); });
   bot.callbackQuery('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.answerCallbackQuery(); await ctx.editMessageText(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
 
@@ -392,6 +396,21 @@ async function showReferral(ctx: any, locale: 'en' | 'ar', edit = false): Promis
 
   const keyboard = referralMenu(locale, userId);
   if (edit) await ctx.editMessageText(text, { reply_markup: keyboard }); else await ctx.reply(text, { reply_markup: keyboard });
+}
+
+async function showLeaderboard(ctx: any, locale: 'en' | 'ar', edit = false): Promise<void> {
+  const supabase = supabaseAdminConfig();
+  let lines:string[]=[];
+  if(supabase){
+    try{
+      const rows=await fetch(supabase.base+'cp_referral_leaderboard?select=rank,telegram_user_id,username,display_name,qualifying_paid_users,accrued_stars&order=rank.asc&limit=10',{headers:supabase.headers}).then(r=>r.json()) as Array<{rank:number;telegram_user_id:number;username:string|null;display_name:string|null;qualifying_paid_users:number;accrued_stars:number}>;
+      lines=Array.isArray(rows)?rows.map((r)=>`#${Number(r.rank)} · ${r.username?'@'+r.username:(r.display_name??'CryptoPulse user')} · ${Number(r.qualifying_paid_users).toLocaleString()} paid · ${Number(r.accrued_stars).toLocaleString()} ⭐`):[];
+    }catch(error){ console.warn('Referral leaderboard unavailable:',error); }
+  }
+  const text=locale==='ar'
+    ? `👑 لوحة المتصدرين العالمية\n\n${lines.length?lines.join('\\n'):'لا توجد نشاطات مدفوعة مؤهلة بعد.'}\n\nيتم احتساب المستخدمين المدفوعين المؤهلين فقط؛ الحالات قيد المراجعة أو المحظورة لا تدخل الترتيب.`
+    : `👑 Global Referral Leaderboard\n\n${lines.length?lines.join('\\n'):'No qualifying paid activity yet.'}\n\nOnly qualifying paid users are ranked; held or blocked activity is excluded.`;
+  if(edit) await ctx.editMessageText(text,{reply_markup:referralMenu(locale,Number(ctx.from?.id))}); else await ctx.reply(text,{reply_markup:referralMenu(locale,Number(ctx.from?.id))});
 }
 
 async function sendMarkets(ctx: any, locale: 'en' | 'ar'): Promise<void> {
