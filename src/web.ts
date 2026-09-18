@@ -43,7 +43,7 @@ async function proxyToNext(req: IncomingMessage, res: ServerResponse): Promise<v
 
   res.statusCode = response.status;
   response.headers.forEach((value, key) => {
-    if (key !== 'connection' && key !== 'keep-alive' && key !== 'transfer-encoding') res.setHeader(key, value);
+    if (key !== 'connection' && key !== 'keep-alive' && key !== 'transfer-encoding' && key !== 'content-encoding' && key !== 'content-length') res.setHeader(key, value);
   });
   res.end(Buffer.from(await response.arrayBuffer()));
 }
