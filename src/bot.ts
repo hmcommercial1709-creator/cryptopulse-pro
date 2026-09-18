@@ -354,12 +354,20 @@ export function createBot(): Bot {
     if (!match) return;
     const locale = getLocale(ctx.from?.language_code);
     const x = t(locale);
-    await ctx.answerCallbackQuery();
-    const risk = match[1] as RiskLevel;
-    const snapshot = await getMarketSnapshot('BTC');
-    const plan = buildBeginnerTradePlan(snapshot, risk);
-    const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
-    await ctx.editMessageText(`${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: $${plan.entry.toLocaleString()}\n${x.stop}: $${plan.stopLoss.toFixed(2)}\n${x.target}: $${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1`, { reply_markup: new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home') });
+    await acknowledge(ctx);
+    try {
+      const risk = match[1] as RiskLevel;
+      const snapshot = await getMarketSnapshot('BTC');
+      const plan = buildBeginnerTradePlan(snapshot, risk);
+      const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
+      await safeEdit(ctx, `${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: ${plan.entry.toLocaleString()}\n${x.stop}: ${plan.stopLoss.toFixed(2)}\n${x.target}: ${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1`, new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home'));
+    } catch (error) {
+      console.error('Risk calculator callback failed:', error);
+      await safeEdit(ctx, locale === 'ar'
+        ? '⚠️ تعذر الوصول إلى سعر BTC المباشر. سيعيد CryptoPulse المحاولة تلقائيًا عند الطلب.'
+        : '⚠️ Live BTC data is temporarily unavailable. CryptoPulse will retry automatically when requested.',
+        riskMenu(locale));
+    }
   });
 
   bot.catch((error) => console.error('CryptoPulse bot error:', error.error));
