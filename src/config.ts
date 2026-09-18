@@ -12,7 +12,7 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   marketApiKey: process.env.MARKET_DATA_API_KEY ?? '',
-  miniAppUrl: (process.env.MINI_APP_URL ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'https://cryptopulse-pro-production.up.railway.app')).replace(/\/$/, ''),
+  miniAppUrl: (process.env.MINI_APP_URL ?? '').replace(/\/$/, ''),
 };
 
 export function requireBotToken(): string {
