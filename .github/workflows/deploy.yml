@@ -1,4 +1,4 @@
-name: Deploy CryptoPulse Edge
+name: Deploy CryptoPulse to Cloudflare
 
 on:
   push:
@@ -9,11 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: cryptopulse-edge-deploy-${{ github.ref }}
+  group: cryptopulse-cloudflare-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   deploy-edge:
+    name: Deploy Telegram Edge Worker
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -23,14 +24,41 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm install --no-audit --no-fund
-      - name: Typecheck
+      - name: Typecheck Node application
         run: npm run check
-      - name: Deploy Cloudflare Worker
+      - name: Validate Edge Worker
+        run: npx wrangler deploy --dry-run --config wrangler.toml
+      - name: Deploy Edge Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4.134.0"
+          command: deploy --config wrangler.toml
+
+  deploy-mini-app:
+    name: Deploy Next.js Mini App
+    runs-on: ubuntu-latest
+    environment: production
+    needs: deploy-edge
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Mini App dependencies
+        run: npm install --prefix apps/web --no-audit --no-fund
+      - name: Build Mini App for Cloudflare
+        run: npm --prefix apps/web run build:edge
+      - name: Deploy Mini App
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.134.0"
+          workingDirectory: apps/web
           command: deploy --config wrangler.toml
