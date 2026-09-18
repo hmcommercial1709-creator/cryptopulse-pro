@@ -183,6 +183,25 @@ export function createBot(): Bot {
         const cfgRows = await fetch(base + 'cp_referral_program_config?id=eq.true&select=telegram_commission_permille&limit=1', { headers: h }).then(r => r.json()) as Array<{telegram_commission_permille:number}>;
         const commissionPermille = Math.max(0, Math.min(1000, Number(cfgRows[0]?.telegram_commission_permille ?? 150)));
         const commissionStars = Math.floor(Number(payment.total_amount) * commissionPermille / 1000);
+
+        // Risk scoring uses only signals actually available to CryptoPulse:
+        // duplicate-safe payment IDs, referral velocity, account age and unusually large Stars payments.
+        const [velocityRows, referredRows] = await Promise.all([
+          fetch(base + 'cp_referrals?referrer_user_id=eq.' + encodeURIComponent(referrerId) + '&created_at=gte.' + encodeURIComponent(new Date(Date.now()-24*60*60*1000).toISOString()) + '&select=id&limit=1000', {headers:h}).then(r=>r.json()) as Promise<Array<{id:string}>>,
+          fetch(base + 'cp_users?id=eq.' + encodeURIComponent(userId) + '&select=created_at&limit=1', {headers:h}).then(r=>r.json()) as Promise<Array<{created_at:string}>>
+        ]);
+        let riskScore = 0;
+        const riskReasons:string[] = [];
+        if (Array.isArray(velocityRows) && velocityRows.length >= 50) { riskScore += 30; riskReasons.push('high_referral_velocity_24h'); }
+        if (Array.isArray(velocityRows) && velocityRows.length >= 100) { riskScore += 20; riskReasons.push('very_high_referral_velocity_24h'); }
+        const accountAgeMs = referredRows[0]?.created_at ? Date.now() - new Date(referredRows[0].created_at).getTime() : 0;
+        if (accountAgeMs >= 0 && accountAgeMs < 10*60*1000) { riskScore += 15; riskReasons.push('payment_shortly_after_account_creation'); }
+        if (Number(payment.total_amount) >= 10000) { riskScore += 25; riskReasons.push('unusually_large_payment'); }
+        riskScore = Math.min(100, riskScore);
+        const decision = riskScore >= 70 ? 'blocked' : riskScore >= 40 ? 'review' : 'clear';
+        const eligibilityStatus = decision === 'clear' ? 'eligible' : decision;
+        const holdUntil = decision === 'review' ? new Date(Date.now()+24*60*60*1000).toISOString() : null;
+
         await fetch(base + 'cp_referral_commissions?on_conflict=payment_id', {
           method:'POST',
           headers:{...h,'Content-Type':'application/json',Prefer:'resolution=ignore-duplicates'},
@@ -193,8 +212,17 @@ export function createBot(): Bot {
             payment_stars:payment.total_amount,
             commission_permille:commissionPermille,
             commission_stars:commissionStars,
-            status:'accrued'
+            status:'accrued',
+            risk_score:riskScore,
+            eligibility_status:eligibilityStatus,
+            hold_until:holdUntil,
+            risk_reasons:riskReasons
           })
+        });
+        await fetch(base + 'cp_referral_risk_events', {
+          method:'POST',
+          headers:{...h,'Content-Type':'application/json'},
+          body:JSON.stringify({referrer_user_id:referrerId,referred_user_id:userId,payment_id:paymentId,risk_score:riskScore,decision,reasons:riskReasons})
         });
       }
       const startsAt=new Date().toISOString();
@@ -312,7 +340,7 @@ async function showPro(ctx: any, locale: 'en' | 'ar', edit = false): Promise<voi
     const body=await response.json() as {ok?:boolean;result?:string;description?:string};
     if(!response.ok||!body.ok||!body.result) throw new Error(body.description??'Invoice unavailable.');
     const text = locale==='ar'
-      ? '⭐ CryptoPulse Pro\n\n299 Stars / 30 يومًا.\n\n🔥 الإحالة المستهدفة: 15% عمولة مباشرة وفق برنامج Telegram الرسمي وشروطه.\n🏆 مكافآت النمو: 1,000 مدفوع = 500 Stars، 10,000 = 10,000، 100,000 = 100,000، 1,000,000 = 1,000,000، 10,000,000 = 10,000,000، 100,000,000 = 100,000,000 Stars.\n\nاضغط الزر للدفع عبر Telegram Stars.'
+      ? '⭐ CryptoPulse Pro\n\n299 Stars / 30 يومًا.\n\n🔥 معدل CryptoPulse الداخلي الحالي: 15% من معاملات Stars المؤهلة والمسجلة في سجل البرنامج. برنامج Telegram Affiliate الأصلي منفصل.\n🏆 مكافآت النمو: 1,000 مدفوع = 500 Stars، 10,000 = 10,000، 100,000 = 100,000، 1,000,000 = 1,000,000، 10,000,000 = 10,000,000، 100,000,000 = 100,000,000 Stars.\n\nاضغط الزر للدفع عبر Telegram Stars.'
       : '⭐ CryptoPulse Pro\n\n299 Stars / 30 days.\n\n🔥 Target direct affiliate: 15% under Telegram\'s official program and rules.\n🏆 Growth Rewards: 1,000 paid = 500 Stars, 10,000 = 10,000, 100,000 = 100,000, 1,000,000 = 1,000,000, 10,000,000 = 10,000,000, 100,000,000 = 100,000,000 Stars.\n\nTap the button to pay with Telegram Stars.';
     const keyboard = new InlineKeyboard().url(locale==='ar'?'⭐ ادفع 299 Stars':'⭐ Pay 299 Stars', body.result).row().text(locale==='ar'?'🚨 💰 كنز الإحالات':'🚨 💰 Referral Rewards','referral').row().text(locale==='ar'?'⬅️ الرئيسية':'⬅️ Home','home');
     if(edit) await ctx.editMessageText(text,{reply_markup:keyboard}); else await ctx.reply(text,{reply_markup:keyboard});
