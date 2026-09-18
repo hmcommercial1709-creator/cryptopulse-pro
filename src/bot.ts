@@ -4,6 +4,29 @@ import { getMarketSnapshot, getMarketSnapshots } from './market.js';
 import { buildBeginnerTradePlan, type RiskLevel } from './domain.js';
 import { getLocale, t } from './i18n.js';
 
+const REQUEST_DEDUP_WINDOW_MS = 1_250;
+const recentRequests = new Map<string, number>();
+
+function requestFingerprint(ctx: any): string {
+  const userId = String(ctx.from?.id ?? 'anonymous');
+  const action = String(ctx.callbackQuery?.data ?? ctx.message?.text ?? 'update').trim().slice(0, 120);
+  const timeBucket = Math.floor(Date.now() / REQUEST_DEDUP_WINDOW_MS);
+  return userId + ':' + action + ':' + timeBucket;
+}
+
+function isDuplicateRapidRequest(ctx: any): boolean {
+  const key = requestFingerprint(ctx);
+  const now = Date.now();
+  const previous = recentRequests.get(key);
+  recentRequests.set(key, now);
+  if (recentRequests.size > 2000) {
+    for (const [entry, timestamp] of recentRequests) {
+      if (now - timestamp > REQUEST_DEDUP_WINDOW_MS * 2) recentRequests.delete(entry);
+    }
+  }
+  return previous !== undefined && now - previous < REQUEST_DEDUP_WINDOW_MS;
+}
+
 function supabaseAdminConfig(): { base: string; headers: Record<string, string> } | null {
   const url = process.env.SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -85,6 +108,7 @@ async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<vo
 function menu(locale: 'en' | 'ar'): InlineKeyboard {
   const x = t(locale);
   const referralLabel = locale === 'ar' ? '🚨 💰 مركز الإحالات والمكافآت' : '🚨 💰 Referral Center';
+  const shareLabel = locale === 'ar' ? '📣 شارك رابطك واكسب Stars المؤهلة' : '📣 Share your link & earn eligible Stars';
   return new InlineKeyboard()
     .text(x.markets, 'markets').text('⚡ Signals', 'signals').row()
     .text(x.trade, 'trade').text('🤖 Auto Trade', 'auto').row()
@@ -94,7 +118,8 @@ function menu(locale: 'en' | 'ar'): InlineKeyboard {
     // The referral screen then exposes the authenticated Mini App WebApp button.
     .text(referralLabel, 'referral').row()
     .text(x.learn, 'learn').text(x.pro, 'pro').row()
-    .text(x.help, 'help');
+    .text(x.help, 'help').row()
+    .url(shareLabel, config.botUsername ? `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${config.botUsername}?start=ref_${'${'}0${'}'})}&text=${encodeURIComponent(locale === 'ar' ? '🚀 انضم إلى CryptoPulse عبر رابط الإحالة الخاص بي.' : '🚀 Join CryptoPulse using my referral link.')}` : 'https://t.me/');
 }
 
 function riskMenu(locale: 'en' | 'ar'): InlineKeyboard {
@@ -142,9 +167,45 @@ function requireThreeSnapshots(snapshots: Awaited<ReturnType<typeof getMarketSna
 export function createBot(): Bot {
   const bot = new Bot(requireBotToken());
 
+  // Omni-Core middleware: acknowledge callbacks immediately, deduplicate rapid taps,
+  // and contain unexpected handler failures so one update can never crash the process.
+  bot.use(async (ctx, next) => {
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery().catch(() => {});
+    }
+    if (isDuplicateRapidRequest(ctx)) {
+      return;
+    }
+    try {
+      await next();
+    } catch (error) {
+      console.error('Omni-Core update recovery:', error);
+      try {
+        if (ctx.callbackQuery) {
+          const locale = getLocale(ctx.from?.language_code);
+          await safeEdit(ctx,
+            locale === 'ar'
+              ? '⚠️ حدث خطأ مؤقت. لم يتوقف CryptoPulse. أعد المحاولة الآن.'
+              : '⚠️ A temporary error occurred. CryptoPulse is still running. Please try again.',
+            menu(locale));
+        } else if (ctx.chat?.id) {
+          const locale = getLocale(ctx.from?.language_code);
+          await ctx.reply(
+            locale === 'ar'
+              ? '⚠️ حدث خطأ مؤقت وتم احتواؤه تلقائيًا. يمكنك المتابعة دون إعادة تشغيل البوت.'
+              : '⚠️ A temporary error was contained automatically. You can continue without restarting the bot.',
+            { reply_markup: menu(locale) },
+          );
+        }
+      } catch (recoveryError) {
+        console.error('Omni-Core user recovery response failed:', recoveryError);
+      }
+    }
+  });
+
   bot.command('start', async (ctx) => {
     const locale = getLocale(ctx.from?.language_code);
-    const payload = typeof ctx.match === 'string' ? ctx.match.trim().slice(0, 64) : '';
+    const payload = typeof ctx.match === 'string' ? ctx.match.trim().slice(0, 64).replace(/[^A-Za-z0-9_-]/g, '') : '';
     await ensureTelegramUser(ctx, payload);
     const source = payload || 'direct';
     const intro = locale === 'ar'
@@ -270,6 +331,15 @@ export function createBot(): Bot {
       { command: 'help', description: x.help.replace(/^[^ ]+ /, '') },
     ], { language_code: locale });
   }
+
+  // Telegram-native discovery metadata. This configures the searchable bot profile;
+  // it does not guarantee a ranking position in Telegram search.
+  void bot.api.setMyShortDescription({
+    short_description: 'CryptoPulse Pro — AI crypto analysis, signals, markets & Telegram Stars.',
+  }).catch((error) => console.warn('Telegram short description update failed:', error));
+  void bot.api.setMyDescription({
+    description: 'CryptoPulse Pro is a crypto market intelligence bot with live market data, trading education, AI-assisted analysis, alerts, referral rewards and Telegram Stars features. Crypto markets are volatile; no profit guarantee.',
+  }).catch((error) => console.warn('Telegram description update failed:', error));
 
   bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
