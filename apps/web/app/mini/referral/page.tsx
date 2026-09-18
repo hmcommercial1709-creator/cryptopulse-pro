@@ -1,66 +1,21 @@
 'use client';
-
-import { useEffect, useState } from 'react';
-
-type Stats = { referrals: number; activatedReferrals: number; sharedReferrals: number };
-
-export default function ReferralPage(): JSX.Element {
-  const [url, setUrl] = useState('');
-  const [stats, setStats] = useState<Stats>({ referrals: 0, activatedReferrals: 0, sharedReferrals: 0 });
-  const [message, setMessage] = useState('');
-
-  useEffect(() => {
-    const headers = { 'x-telegram-init-data': window.Telegram?.WebApp?.initData ?? '' };
-    void fetch('/api/growth', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'referral_open', metadata: { surface: 'mini_referral' } }) }).catch(() => undefined);
-    void Promise.all([
-      fetch('/api/referral', { headers }).then((r) => r.json() as Promise<{ url?: string }>),
-      fetch('/api/referral/stats', { headers }).then((r) => r.json() as Promise<Stats>),
-    ]).then(([link, data]) => {
-      if (link.url) setUrl(link.url);
-      setStats({
-        referrals: Number(data.referrals ?? 0),
-        activatedReferrals: Number(data.activatedReferrals ?? 0),
-        sharedReferrals: Number(data.sharedReferrals ?? 0),
-      });
-    }).catch(() => setMessage('Referral data is temporarily unavailable.'));
-  }, []);
-
-  const share = () => {
-    if (!url) return;
-    const text = encodeURIComponent('Join me on CryptoPulse for live crypto market intelligence inside Telegram.');
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${text}`;
-    if (window.Telegram?.WebApp?.openTelegramLink) window.Telegram.WebApp.openTelegramLink(shareUrl);
-    else window.open(shareUrl, '_blank', 'noopener,noreferrer');
-  };
-
-  const copy = async () => {
-    if (!url) return;
-    await navigator.clipboard?.writeText(url);
-    setMessage('Referral link copied.');
-  };
-
-  return (
-    <main style={{ minHeight: '100vh', background: '#070b14', color: '#f7f9fc', fontFamily: 'system-ui, sans-serif', padding: 16 }}>
-      <section style={{ maxWidth: 620, margin: '0 auto' }}>
-        <button onClick={() => { window.location.href = '/mini'; }} style={buttonBack}>← Back to CryptoPulse</button>
-        <h1>🚀 CryptoPulse Growth</h1>
-        <p style={{ opacity: .65 }}>Invite people directly through Telegram and track real activations.</p>
-        <div style={card}><strong>Your referral link</strong><div style={linkBox}>{url || 'Loading…'}</div><div style={grid}><button onClick={() => void copy()} style={button}>Copy link</button><button onClick={share} style={button}>📤 Share on Telegram</button></div></div>
-        <div style={grid}>
-          <div style={card}><strong>{stats.referrals}</strong><div style={muted}>Referrals</div></div>
-          <div style={card}><strong>{stats.activatedReferrals}</strong><div style={muted}>Activated</div></div>
-          <div style={card}><strong>{stats.sharedReferrals}</strong><div style={muted}>First shares</div></div>
-        </div>
-        {message && <div style={{ ...card, opacity: .8 }}>{message}</div>}
-        <p style={{ opacity: .45, fontSize: 12 }}>Counts are server-side events recorded by CryptoPulse. No guaranteed earnings or rewards are implied.</p>
-      </section>
-    </main>
-  );
+import { useEffect,useState } from 'react';
+type Reward={threshold:number;stars:number;status:string;qualifyingPaidUsers:number};
+type Stats={referrals:number;activatedReferrals:number;sharedReferrals:number;paidNetworkUsers:number;networkUsers:number;levels?:{threshold:number;stars:number}[];rewards?:Reward[]};
+export default function ReferralPage():JSX.Element{
+ const [url,setUrl]=useState('');const [stats,setStats]=useState<Stats>({referrals:0,activatedReferrals:0,sharedReferrals:0,paidNetworkUsers:0,networkUsers:0,levels:[]});const [message,setMessage]=useState('');
+ useEffect(()=>{const headers={'x-telegram-init-data':window.Telegram?.WebApp?.initData??''};void fetch('/api/growth',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({event:'referral_open',metadata:{surface:'mini_referral'}})}).catch(()=>undefined);void Promise.all([fetch('/api/referral',{headers}).then(r=>r.json()),fetch('/api/referral/stats',{headers}).then(r=>r.json())]).then(([link,data])=>{if(link.url)setUrl(link.url);setStats({referrals:Number(data.referrals??0),activatedReferrals:Number(data.activatedReferrals??0),sharedReferrals:Number(data.sharedReferrals??0),paidNetworkUsers:Number(data.paidNetworkUsers??0),networkUsers:Number(data.networkUsers??0),levels:data.levels??[],rewards:data.rewards??[]});}).catch(()=>setMessage('Referral data is temporarily unavailable.'));},[]);
+ const share=()=>{if(!url)return;const text=encodeURIComponent('🚀 Join CryptoPulse Pro and build your own referral group.');const shareUrl='https://t.me/share/url?url='+encodeURIComponent(url)+'&text='+text;if(window.Telegram?.WebApp?.openTelegramLink)window.Telegram.WebApp.openTelegramLink(shareUrl);else window.open(shareUrl,'_blank','noopener,noreferrer');};
+ const copy=async()=>{if(!url)return;await navigator.clipboard?.writeText(url);setMessage('Referral link copied.');};
+ return <main style={{minHeight:'100vh',background:'#070b14',color:'#f7f9fc',fontFamily:'system-ui,sans-serif',padding:16}}><section style={{maxWidth:620,margin:'0 auto'}}>
+ <button onClick={()=>{window.location.href='/mini';}} style={back}>← Back to CryptoPulse</button>
+ <div style={hero}><h1>🚨 💰 Referral Growth Center</h1><p>Build your own group. Only successful paid Pro users count toward Growth Rewards.</p><div style={price}>⭐ Pro: 299 Stars / 30 days</div></div>
+ <div style={card}><strong>Your referral link</strong><div style={linkBox}>{url||'Loading…'}</div><div style={grid2}><button onClick={()=>void copy()} style={button}>Copy link</button><button onClick={share} style={button}>📤 Share on Telegram</button></div></div>
+ <div style={grid}><div style={card}><strong>{stats.referrals}</strong><div style={muted}>Direct referrals</div></div><div style={card}><strong>{stats.paidNetworkUsers}</strong><div style={muted}>Paid Pro in network</div></div><div style={card}><strong>{stats.networkUsers}</strong><div style={muted}>Total network</div></div></div>
+ <div style={card}><h2>🏆 Growth Rewards</h2><p style={muted}>Milestones are based on successful eligible Pro payments, not clicks or unpaid signups.</p>{(stats.levels??[]).map(l=>{const hit=stats.paidNetworkUsers>=l.threshold;return <div key={l.threshold} style={{padding:'11px 0',borderBottom:'1px solid #1e2a3c',display:'flex',justifyContent:'space-between',gap:8}}><span>{hit?'✅':'🔒'} {l.threshold.toLocaleString()} paid users</span><strong>{l.stars.toLocaleString()} ⭐</strong></div>})}</div>
+ <div style={card}><h2>🔥 How it works</h2><ol style={{lineHeight:1.7,opacity:.85}}><li>Share your personal Telegram referral link.</li><li>Build your own referral group.</li><li>Only successful paid Pro users count.</li><li>Telegram Affiliate commission is separate and governed by Telegram.</li><li>CryptoPulse Growth Rewards are verified before approval.</li></ol></div>
+ {message&&<div style={card}>{message}</div>}
+ <p style={{opacity:.45,fontSize:12}}>No reward is created for unpaid users, fake accounts, refunds or disallowed activity. Rewards are subject to the published program rules and verification.</p>
+ </section></main>
 }
-
-const card: React.CSSProperties = { background: '#101827', border: '1px solid #1e2a3c', borderRadius: 18, padding: 16, marginBottom: 10 };
-const linkBox: React.CSSProperties = { marginTop: 10, padding: 12, borderRadius: 10, background: '#0b111d', overflowWrap: 'anywhere', opacity: .8, fontSize: 13 };
-const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 };
-const button: React.CSSProperties = { border: 0, borderRadius: 10, padding: 11, background: '#1769e0', color: 'white', fontWeight: 700, cursor: 'pointer' };
-const buttonBack: React.CSSProperties = { border: 0, borderRadius: 10, padding: 10, background: '#1a2332', color: 'white', cursor: 'pointer', marginBottom: 12 };
-const muted: React.CSSProperties = { opacity: .55, fontSize: 12, marginTop: 4 };
+const hero:React.CSSProperties={background:'linear-gradient(135deg,#151f35,#101827)',border:'1px solid #2a3a55',borderRadius:20,padding:20,marginBottom:12};const price:React.CSSProperties={fontSize:20,fontWeight:900,marginTop:12};const card:React.CSSProperties={background:'#101827',border:'1px solid #1e2a3c',borderRadius:18,padding:16,marginBottom:10};const linkBox:React.CSSProperties={marginTop:10,padding:12,borderRadius:10,background:'#0b111d',overflowWrap:'anywhere',opacity:.8,fontSize:13};const grid:React.CSSProperties={display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginTop:10};const grid2:React.CSSProperties={display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:10};const button:React.CSSProperties={border:0,borderRadius:10,padding:11,background:'#1769e0',color:'white',fontWeight:700,cursor:'pointer'};const back:React.CSSProperties={border:0,borderRadius:10,padding:10,background:'#1a2332',color:'white',cursor:'pointer',marginBottom:12};const muted:React.CSSProperties={opacity:.6,fontSize:12};
