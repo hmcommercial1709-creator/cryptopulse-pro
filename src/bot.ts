@@ -68,6 +68,7 @@ async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<vo
     if (!refMatch) return;
 
     const referralToken = refMatch[1];
+    if (!referralToken) return;
     const referrerQuery = /^\d+$/.test(referralToken)
       ? 'telegram_user_id=eq.' + encodeURIComponent(referralToken)
       : 'referral_code=eq.' + encodeURIComponent(referralToken.toLowerCase());
@@ -217,8 +218,7 @@ export function createBot(): Bot {
   });
   bot.command('markets', async (ctx) => sendMarkets(ctx, getLocale(ctx.from?.language_code)));
   bot.command('trade', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await ctx.reply(t(locale).tradeIntro, { reply_markup: riskMenu(locale) }); });
-  bot.command('signals', async (ctx) => showSignals(ctx, getLocale(ctx.from?.language_code)));
-  bot.command('auto', async (ctx) => showAuto(ctx, getLocale(ctx.from?.language_code)));
+  bot.command('signals', async (ctx) => showSignals(ctx, getLocale(ctx.from?.language_code)));  bot.command('auto', async (ctx) => showAuto(ctx, getLocale(ctx.from?.language_code)));
   bot.command('portfolio', async (ctx) => {
     const locale = getLocale(ctx.from?.language_code);
     await ctx.reply(locale === 'ar' ? '💼 افتح CryptoPulse Mini App لعرض محفظتك المرتبطة بحسابك الشخصي.' : '💼 Open the CryptoPulse Mini App to view your user-scoped connected portfolio.', { reply_markup: nav(locale) });
@@ -335,12 +335,10 @@ export function createBot(): Bot {
 
   // Telegram-native discovery metadata. This configures the searchable bot profile;
   // it does not guarantee a ranking position in Telegram search.
-  void bot.api.setMyShortDescription({
-    short_description: 'CryptoPulse Pro — AI crypto analysis, signals, markets & Telegram Stars.',
-  }).catch((error) => console.warn('Telegram short description update failed:', error));
-  void bot.api.setMyDescription({
-    description: 'CryptoPulse Pro is a crypto market intelligence bot with live market data, trading education, AI-assisted analysis, alerts, referral rewards and Telegram Stars features. Crypto markets are volatile; no profit guarantee.',
-  }).catch((error) => console.warn('Telegram description update failed:', error));
+  void bot.api.setMyShortDescription('CryptoPulse Pro — AI crypto analysis, signals, markets & Telegram Stars.')
+    .catch((error) => console.warn('Telegram short description update failed:', error));
+  void bot.api.setMyDescription('CryptoPulse Pro is a crypto market intelligence bot with live market data, trading education, AI-assisted analysis, alerts, referral rewards and Telegram Stars features. Crypto markets are volatile; no profit guarantee.')
+    .catch((error) => console.warn('Telegram description update failed:', error));
 
   bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
