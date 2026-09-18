@@ -68,7 +68,7 @@ async function ensureTelegramUser(ctx: any, referralPayload: string): Promise<vo
     if (!refMatch) return;
 
     const referralToken = refMatch[1];
-    const referrerQuery = /^\\d+$/.test(referralToken)
+    const referrerQuery = /^\d+$/.test(referralToken)
       ? 'telegram_user_id=eq.' + encodeURIComponent(referralToken)
       : 'referral_code=eq.' + encodeURIComponent(referralToken.toLowerCase());
     const referrerRows = await fetch(
@@ -514,7 +514,7 @@ export function createBot(): Bot {
           const snapshot = await getMarketSnapshot('BTC');
           const plan = buildBeginnerTradePlan(snapshot, risk);
           const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
-          await safeEdit(ctx, \`${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: ${plan.entry.toLocaleString()}\n${x.stop}: ${plan.stopLoss.toFixed(2)}\n${x.target}: ${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1\`, new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home'));
+          await safeEdit(ctx, `${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: ${plan.entry.toLocaleString()}\n${x.stop}: ${plan.stopLoss.toFixed(2)}\n${x.target}: ${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1`, new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home'));
         } catch (error) {
           console.error('Risk calculator callback failed:', error);
           await safeEdit(ctx,
