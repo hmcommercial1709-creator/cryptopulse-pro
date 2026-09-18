@@ -349,24 +349,120 @@ export function createBot(): Bot {
   bot.callbackQuery('pro', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); try { await showPro(ctx, locale, true); } catch (error) { console.error('Pro callback failed:', error); await safeEdit(ctx, locale === 'ar' ? '⭐ تعذر فتح Pro الآن.' : '⭐ Pro is temporarily unavailable.', nav(locale)); } });
   bot.callbackQuery('help', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).helpText, nav(locale)); });
   bot.callbackQuery('home', async (ctx) => { const locale = getLocale(ctx.from?.language_code); await acknowledge(ctx); await safeEdit(ctx, t(locale).start, menu(locale)); });
+  // Telegram callbacks are acknowledged immediately. Each action is isolated so one
+  // provider/database failure cannot break the rest of the menu.
   bot.on('callback_query:data', async (ctx) => {
-    const match = /^risk:(low|medium|high)$/.exec(ctx.callbackQuery.data);
-    if (!match) return;
+    const data = ctx.callbackQuery.data;
     const locale = getLocale(ctx.from?.language_code);
     const x = t(locale);
     await acknowledge(ctx);
+
     try {
-      const risk = match[1] as RiskLevel;
-      const snapshot = await getMarketSnapshot('BTC');
-      const plan = buildBeginnerTradePlan(snapshot, risk);
-      const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
-      await safeEdit(ctx, `${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: ${plan.entry.toLocaleString()}\n${x.stop}: ${plan.stopLoss.toFixed(2)}\n${x.target}: ${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1`, new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home'));
+      if (data === 'markets') {
+        await editMarkets(ctx, locale);
+        return;
+      }
+      if (data === 'signals') {
+        await showSignals(ctx, locale, true);
+        return;
+      }
+      if (data === 'trade') {
+        await safeEdit(ctx, x.tradeIntro, riskMenu(locale));
+        return;
+      }
+      if (data === 'auto') {
+        await showAuto(ctx, locale, true);
+        return;
+      }
+      if (data === 'portfolio') {
+        await safeEdit(ctx,
+          locale === 'ar'
+            ? '💼 المحفظة\n\nافتح Mini App لعرض محفظتك المرتبطة بحساب Telegram الخاص بك.\n\nيمكنك المتابعة من هناك دون تعطيل البوت.'
+            : '💼 Portfolio\n\nOpen the Mini App to view your Telegram-scoped portfolio.\n\nYou can continue there without blocking the bot.',
+          nav(locale));
+        return;
+      }
+      if (data === 'alerts') {
+        await safeEdit(ctx,
+          locale === 'ar'
+            ? '🔔 التنبيهات\n\nسيتم تشغيل التنبيهات من Mini App بعد اختيار العملات وشروط التنبيه الخاصة بك.'
+            : '🔔 Alerts\n\nConfigure coin alerts and trigger conditions in the Mini App.',
+          nav(locale));
+        return;
+      }
+      if (data === 'risk-tool') {
+        await safeEdit(ctx,
+          locale === 'ar' ? '🧮 أداة إدارة المخاطر\n\nاختر مستوى المخاطرة لحساب خطة تعليمية مبنية على سعر BTC الحالي.' : '🧮 Risk Tool\n\nChoose a risk level for an educational plan based on the current BTC price.',
+          riskMenu(locale));
+        return;
+      }
+      if (data === 'referral') {
+        await showReferral(ctx, locale, true);
+        return;
+      }
+      if (data === 'leaderboard') {
+        await showLeaderboard(ctx, locale, true);
+        return;
+      }
+      if (data === 'pro') {
+        await showPro(ctx, locale, true);
+        return;
+      }
+      if (data === 'learn') {
+        await safeEdit(ctx,
+          locale === 'ar'
+            ? '📚 التعلم\n\nابدأ بإدارة المخاطر، فهم الاتجاه، قراءة تغير 24 ساعة، ثم اختبر أي خطة قبل استخدامها بأموال حقيقية.\n\nالمحتوى تعليمي وليس ضمانًا للربح.'
+            : '📚 Learn\n\nStart with risk management, trend context, 24h changes, and test plans before using real funds.\n\nEducational content only; no profit guarantee.',
+          nav(locale));
+        return;
+      }
+      if (data === 'help') {
+        await safeEdit(ctx,
+          locale === 'ar'
+            ? '🆘 المساعدة\n\nاستخدم Markets للأسعار، Signals للإشارات، Trade للخطة التعليمية، Risk Tool للمخاطر، Pro للاشتراك، وReferral للمكافآت.\n\nإذا تعطل مصدر بيانات خارجي، يعيد CryptoPulse المحاولة ويستخدم آخر بيانات صالحة متاحة بدل إيقاف البوت.'
+            : '🆘 Help\n\nUse Markets for prices, Signals for market signals, Trade for an educational plan, Risk Tool for risk settings, Pro for subscription, and Referral for rewards.\n\nIf an external provider fails, CryptoPulse retries and can use the latest valid cached data instead of stopping the bot.',
+          nav(locale));
+        return;
+      }
+      if (data === 'home') {
+        const intro = locale === 'ar'
+          ? '🚀 CryptoPulse Pro\n\nالسوق والتحليلات والتنبيهات وأدوات التداول مباشرة داخل Telegram.'
+          : '🚀 CryptoPulse Pro\n\nLive markets, intelligence, alerts and trading tools directly inside Telegram.';
+        await safeEdit(ctx, intro, menu(locale));
+        return;
+      }
+
+      const riskMatch = /^risk:(low|medium|high)$/.exec(data);
+      if (riskMatch) {
+        try {
+          const risk = riskMatch[1] as RiskLevel;
+          const snapshot = await getMarketSnapshot('BTC');
+          const plan = buildBeginnerTradePlan(snapshot, risk);
+          const direction = locale === 'ar' ? (plan.side === 'buy' ? 'شراء' : 'بيع') : plan.side.toUpperCase();
+          await safeEdit(ctx, \`${x.plan}\n\n${x.direction}: ${direction}\n${x.reference}: ${plan.entry.toLocaleString()}\n${x.stop}: ${plan.stopLoss.toFixed(2)}\n${x.target}: ${plan.takeProfit.toFixed(2)}\n${x.risk}: ${plan.riskLevel}\n${x.rr}: ${plan.riskReward}:1\`, new InlineKeyboard().text('🤖 Auto Trade', 'auto').text(x.retry, 'trade').row().text(x.home, 'home'));
+        } catch (error) {
+          console.error('Risk calculator callback failed:', error);
+          await safeEdit(ctx,
+            locale === 'ar'
+              ? '⚠️ تعذر الوصول إلى سعر BTC المباشر. سيعيد CryptoPulse المحاولة تلقائيًا عند الطلب.'
+              : '⚠️ Live BTC data is temporarily unavailable. CryptoPulse will retry automatically when requested.',
+            riskMenu(locale));
+        }
+        return;
+      }
+
+      console.warn('Unknown CryptoPulse callback:', data);
     } catch (error) {
-      console.error('Risk calculator callback failed:', error);
-      await safeEdit(ctx, locale === 'ar'
-        ? '⚠️ تعذر الوصول إلى سعر BTC المباشر. سيعيد CryptoPulse المحاولة تلقائيًا عند الطلب.'
-        : '⚠️ Live BTC data is temporarily unavailable. CryptoPulse will retry automatically when requested.',
-        riskMenu(locale));
+      console.error('CryptoPulse callback failed:', { data, error });
+      try {
+        await safeEdit(ctx,
+          locale === 'ar'
+            ? '⚠️ حدث خطأ مؤقت. لم يتوقف البوت. اختر الزر مرة أخرى وسيعيد CryptoPulse المحاولة تلقائيًا.'
+            : '⚠️ A temporary error occurred. The bot is still running. Choose the button again and CryptoPulse will retry automatically.',
+          menu(locale));
+      } catch (fallbackError) {
+        console.error('Callback recovery UI failed:', fallbackError);
+      }
     }
   });
 
