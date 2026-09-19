@@ -130,7 +130,7 @@ async function writeCache(markets: Market[], now: number): Promise<void> {
   }), { headers: { 'content-type': 'application/json' } }))));
 }
 
-async function loadMarkets(): Promise<{ markets: Market[]; source: string; stale: boolean }> {
+async function loadMarkets(apiKey: string): Promise<{ markets: Market[]; source: string; stale: boolean }> {
   const now = Date.now();
   const cached = await readCached(now);
   if (cached.markets.length === ASSETS.length && !cached.stale) {
@@ -138,6 +138,7 @@ async function loadMarkets(): Promise<{ markets: Market[]; source: string; stale
   }
 
   const providers: Array<[string, () => Promise<Market[]>]> = [
+    ...(apiKey.trim() ? [['coinmarketcap', () => providerCoinMarketCap(apiKey)] as [string, () => Promise<Market[]>]] : []),
     ['coingecko', providerCoinGecko],
     ['coincap', providerCoinCap],
     ['binance', providerBinance],
