@@ -10,7 +10,7 @@ type Tab = 'home' | 'trade' | 'intelligence' | 'watchlist' | 'alerts' | 'auto' |
 type HashSection = 'markets' | 'signals' | 'referral' | 'pro';
 
 declare global {
-  interface Window { Telegram?: { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void } } }
+  interface Window { Telegram?: { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void; ready?: () => void; expand?: () => void } } }
 }
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
@@ -100,6 +100,7 @@ export default function MiniTradingTerminal() {
   }, [authHeaders]);
 
   useEffect(() => {
+    try { window.Telegram?.WebApp?.ready?.(); window.Telegram?.WebApp?.expand?.(); } catch { /* Telegram runtime is optional outside Telegram */ }
     void loadUserData(); void track('mini_open');
     applyHashRoute(window.location.hash);
     const onHashChange = () => applyHashRoute(window.location.hash);
