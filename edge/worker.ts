@@ -16,6 +16,9 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
   MINI_APP_URL?: string;
   MARKET_DATA_API_KEY?: string;
+  AI?: {
+    run(model: string, input: unknown, options?: unknown): Promise<unknown>;
+  };
 }
 
 type Locale = 'ar' | 'en';
@@ -127,6 +130,42 @@ function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 
   const url = new URL(getVersionedMiniAppUrl(baseUrl));
   url.hash = section;
   return url.toString();
+}
+
+type RecoveryAction = 'telegram_config' | 'mini_app_health' | 'none';
+
+async function askRecoveryAgent(env: Env, failure: string, path: string): Promise<RecoveryAction> {
+  if (!env.AI) return 'none';
+  try {
+    const result = await env.AI.run('@cf/moonshotai/kimi-k2.6', {
+      messages: [{
+        role: 'system',
+        content: 'You are CryptoPulse Pro operations recovery agent. Return JSON only: {"action":"telegram_config"|"mini_app_health"|"none"}. Choose only the safest operational recovery action. Never suggest code changes, credential changes, payments changes, database destructive actions, or security bypasses.'
+      }, {
+        role: 'user',
+        content: JSON.stringify({ path, failure: failure.slice(0, 1800) })
+      }]
+    }, { gateway: { id: 'default', collectLog: true, metadata: { service: 'cryptopulse-edge', task: 'self-heal' } } });
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    const match = text.match(/"action"\s*:\s*"(telegram_config|mini_app_health|none)"/);
+    return (match?.[1] as RecoveryAction | undefined) ?? 'none';
+  } catch (error) {
+    console.error('Recovery AI failed:', error);
+    return 'none';
+  }
+}
+
+async function autonomousRecovery(env: Env, origin: string, failure: string, path: string): Promise<void> {
+  const action = await askRecoveryAgent(env, failure, path);
+  if (action === 'telegram_config') {
+    await selfHealTelegramConfiguration(env, origin);
+    return;
+  }
+  if (action === 'mini_app_health') {
+    const healthUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env)).replace(/\/mini\?[^#]+$/, '/api/health');
+    const response = await fetch(healthUrl, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('Mini App health recovery check returned HTTP ' + response.status);
+  }
 }
 
 async function selfHealTelegramConfiguration(env: Env, origin: string): Promise<void> {
@@ -600,19 +639,33 @@ export default {
           actorId: getActorId(update),
           error,
         });
+        try { await autonomousRecovery(env, url.origin, error instanceof Error ? error.message : String(error), url.pathname); } catch (recoveryError) { console.error('Autonomous Telegram recovery failed:', recoveryError); }
         return new Response('Internal Server Error', { status: 500 });
       }
     } catch (error) {
       console.error('CryptoPulse Edge boundary failure:', error);
+      try { await autonomousRecovery(env, url?.origin ?? new URL(request.url).origin, error instanceof Error ? error.message : String(error), new URL(request.url).pathname); } catch (recoveryError) { console.error('Autonomous recovery failed:', recoveryError); }
       return new Response('Internal Server Error', { status: 500 });
     }
   },
 
   async scheduled(
     _controller: ScheduledControllerLike,
-    _env: Env,
+    env: Env,
     _ctx: ExecutionContextLike,
   ): Promise<void> {
-    // No queue polling. Telegram webhook processing is direct and synchronous.
+    const origin = 'https://cryptopulse-pro-edge.hmcommercial1709.workers.dev';
+    try {
+      await selfHealTelegramConfiguration(env, origin);
+      const healthUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env)).replace(/\/mini\?[^#]+$/, '/api/health');
+      const response = await fetch(healthUrl, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('Mini App health HTTP ' + response.status);
+    } catch (error) {
+      try {
+        await autonomousRecovery(env, origin, error instanceof Error ? error.message : String(error), 'scheduled-health');
+      } catch (recoveryError) {
+        console.error('Scheduled autonomous recovery failed:', recoveryError);
+      }
+    }
   },
 };
