@@ -17,7 +17,10 @@
     "test": "node --import tsx --test src/__tests__/*.test.ts src/agents/*.test.ts",
     "edge:dev": "npx wrangler dev --config wrangler.toml",
     "edge:deploy": "npx wrangler deploy --config wrangler.toml",
-    "edge:types": "npx wrangler types --config wrangler.toml"
+    "edge:types": "npx wrangler types --config wrangler.toml",
+    "mini:install": "npm --prefix apps/web install --no-audit --no-fund",
+    "mini:build": "npm run mini:install && npm --prefix apps/web run build:edge",
+    "mini:deploy": "npm run mini:build && npx wrangler deploy --config apps/web/wrangler.toml"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
