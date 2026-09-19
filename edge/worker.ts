@@ -466,6 +466,31 @@ type SubscriptionPlan = {
   features: string[];
 };
 
+async function verifyTelegramInitData(initData: string, botToken: string): Promise<{ id: number; username?: string; first_name?: string; last_name?: string; language_code?: string } | null> {
+  if (!initData || !botToken) return null;
+  const params = new URLSearchParams(initData);
+  const receivedHash = params.get('hash') ?? '';
+  const authDate = Number(params.get('auth_date') ?? 0);
+  if (!receivedHash || !Number.isSafeInteger(authDate) || Math.floor(Date.now() / 1000) - authDate > 86400) return null;
+  const pairs: string[] = [];
+  params.forEach((value, key) => { if (key !== 'hash') pairs.push(key + '=' + value); });
+  pairs.sort();
+  const dataCheckString = pairs.join('\n');
+  const enc = new TextEncoder();
+  const secretBase = await crypto.subtle.importKey('raw', enc.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const secret = await crypto.subtle.sign('HMAC', secretBase, enc.encode(botToken));
+  const key = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(dataCheckString)));
+  const hex = Array.from(signature).map(b => b.toString(16).padStart(2, '0')).join('');
+  if (hex !== receivedHash) return null;
+  const rawUser = params.get('user');
+  if (!rawUser) return null;
+  try {
+    const user = JSON.parse(rawUser) as { id?: number; username?: string; first_name?: string; last_name?: string; language_code?: string };
+    return Number.isSafeInteger(user.id) && Number(user.id) > 0 ? { id: Number(user.id), username: user.username, first_name: user.first_name, last_name: user.last_name, language_code: user.language_code } : null;
+  } catch { return null; }
+}
+
 async function getSubscriptionPlans(env: Env): Promise<SubscriptionPlan[]> {
   const { base, headers } = getSupabase(env);
   const response = await fetch(
@@ -788,6 +813,30 @@ export default {
   ): Promise<Response> {
     try {
       const url = new URL(request.url);
+
+      if (url.pathname === '/invoice' && request.method === 'POST') {
+        const initData = request.headers.get('x-telegram-init-data') ?? '';
+        const telegramUser = await verifyTelegramInitData(initData, env.BOT_TOKEN);
+        if (!telegramUser) return Response.json({ ok: false, error: 'Invalid Telegram Mini App authorization.' }, { status: 401 });
+        let body: { plan?: unknown } = {};
+        try { body = await request.json() as { plan?: unknown }; } catch { return Response.json({ ok: false, error: 'Invalid request body.' }, { status: 400 }); }
+        const planCode = typeof body.plan === 'string' ? body.plan.trim() : '';
+        const plans = await getSubscriptionPlans(env);
+        const plan = plans.find(item => item.code === planCode);
+        if (!plan) return Response.json({ ok: false, error: 'Plan unavailable.' }, { status: 404 });
+        const bot = await getBot(env);
+        const options: Record<string, unknown> = { provider_token: '' };
+        if (plan.recurring) options.subscription_period = 2592000;
+        const invoice = await bot.api.createInvoiceLink(
+          plan.name,
+          plan.description,
+          'plan:' + plan.code,
+          'XTR',
+          [{ label: plan.name, amount: plan.price_stars }],
+          options as any,
+        );
+        return Response.json({ ok: true, plan: plan.code, invoiceUrl: invoice });
+      }
 
       if (url.pathname === '/health' || url.pathname === '/healthz') {
         try {
