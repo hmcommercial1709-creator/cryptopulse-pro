@@ -8,6 +8,7 @@ type WatchItem = { id: string; symbol: string; created_at: string };
 type AlertItem = { id: string; symbol: string; condition: 'above' | 'below' | 'change24h'; threshold: number; active: boolean; created_at: string };
 type Tab = 'home' | 'trade' | 'intelligence' | 'watchlist' | 'alerts' | 'auto' | 'portfolio' | 'referral' | 'pro';
 type HashSection = 'markets' | 'signals' | 'referral' | 'pro';
+type Plan = { code: string; name: string; description: string; price_stars: number; billing_period: 'monthly' | 'annual'; recurring: boolean; features: string[] };
 
 
 type TelegramRuntime = { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void; ready?: () => void; expand?: () => void } };
@@ -34,6 +35,9 @@ export default function MiniTradingTerminal() {
   const [alertCondition, setAlertCondition] = useState<'above' | 'below' | 'change24h'>('above');
   const [alertThreshold, setAlertThreshold] = useState('');
   const [shareMessage, setShareMessage] = useState('');
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [agentInstruction, setAgentInstruction] = useState('');
+  const [agentTaskMessage, setAgentTaskMessage] = useState('');
 
   const applyHashRoute = useCallback((hash: string) => {
     const section = hash.replace(/^#/, '').toLowerCase() as HashSection;
@@ -87,6 +91,34 @@ export default function MiniTradingTerminal() {
     }
   }, []);
 
+  const loadPlans = useCallback(async () => {
+    try {
+      const response = await fetch('/api/plans', { cache: 'no-store' });
+      if (response.ok) setPlans(((await response.json()) as { plans: Plan[] }).plans ?? []);
+    } catch { /* pricing UI remains usable with fallback */ }
+  }, []);
+
+  const createAgentTask = async () => {
+    if (!agentInstruction.trim()) return;
+    setBusy(true);
+    try {
+      const response = await fetch('/api/agent/tasks', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ instruction: agentInstruction.trim(), requiresConfirmation: true }),
+      });
+      const body = await response.json() as { message?: string };
+      if (!response.ok) throw new Error(body.message ?? 'Could not create the task.');
+      setAgentTaskMessage('✅ Task created. CryptoPulse will keep monitoring it.');
+      setAgentInstruction('');
+      void track('agent_intent', { instructionLength: agentInstruction.length });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the task.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const loadUserData = useCallback(async () => {
     if (!getTelegramWebApp()?.initData) return;
     try {
@@ -101,7 +133,7 @@ export default function MiniTradingTerminal() {
 
   useEffect(() => {
     try { getTelegramWebApp()?.ready?.(); getTelegramWebApp()?.expand?.(); } catch { /* Telegram runtime is optional outside Telegram */ }
-    void loadUserData(); void track('mini_open');
+    void loadUserData(); void loadPlans(); void track('mini_open');
     applyHashRoute(window.location.hash);
     const onHashChange = () => applyHashRoute(window.location.hash);
     window.addEventListener('hashchange', onHashChange);
@@ -190,10 +222,26 @@ export default function MiniTradingTerminal() {
         {tab === 'intelligence' && <div style={cardStyle}><h2>📊 Asset Intelligence</h2><p style={{ opacity: .65 }}>Factual market snapshots from the latest CoinMarketCap quote response.</p>{markets.map((m) => <div key={m.symbol} style={{ padding: '12px 0', borderBottom: '1px solid #1e2a3c' }}><div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{m.symbol}</strong><span>{money.format(m.price)}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', opacity: .7, fontSize: 12, marginTop: 4 }}><span>{m.change24h >= 0 ? 'Positive' : m.change24h < 0 ? 'Negative' : 'Flat'} 24h movement</span><span>{m.change24h >= 0 ? '+' : ''}{m.change24h.toFixed(2)}%</span></div><div style={{ opacity: .55, fontSize: 11, marginTop: 3 }}>24h volume {m.volume24h == null ? '—' : `$${compact.format(m.volume24h)}`}</div></div>)}</div>}
         {tab === 'watchlist' && <div style={cardStyle}><h2>⭐ Watchlist</h2><p style={{ opacity: .65 }}>Your Telegram-scoped assets are stored server-side.</p>{watchlist.length ? watchlist.map((item) => { const market = markets.find(m => m.symbol === item.symbol); return <button key={item.id} onClick={() => { setSelectedSymbol(item.symbol); setTab('trade'); }} style={{ ...cardStyle, width: '100%', display: 'flex', justifyContent: 'space-between', color: 'inherit', textAlign: 'left' }}><span><strong>{item.symbol}</strong>{market && <span style={{ opacity: .65, marginLeft: 8 }}>{money.format(market.price)}</span>}</span><span>{market ? `${market.change24h >= 0 ? '+' : ''}${market.change24h.toFixed(2)}%` : '—'}</span></button> }) : <div style={{ opacity: .6 }}>No assets saved yet. Add one from a market card.</div>}</div>}
         {tab === 'alerts' && <div style={cardStyle}><h2>🔔 Price Alerts</h2><div style={{ display: 'grid', gap: 8 }}><select value={alertSymbol} onChange={e => setAlertSymbol(e.target.value)} style={inputStyle}>{markets.map(m => <option key={m.symbol}>{m.symbol}</option>)}</select><select value={alertCondition} onChange={e => setAlertCondition(e.target.value as typeof alertCondition)} style={inputStyle}><option value="above">Price above</option><option value="below">Price below</option><option value="change24h">24h change reaches</option></select><input value={alertThreshold} onChange={e => setAlertThreshold(e.target.value)} inputMode="decimal" placeholder={alertCondition === 'change24h' ? 'e.g. 5 or -5' : 'Target price'} style={inputStyle} /><button onClick={() => void createAlert()} style={buttonStyle} disabled={busy}>Create Alert</button></div><div style={{ marginTop: 18 }}>{alerts.map(a => <div key={a.id} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', gap: 8 }}><div><strong>{a.symbol}</strong><div style={{ opacity: .65 }}>{a.condition === 'above' ? 'Above' : a.condition === 'below' ? 'Below' : '24h change'} · {a.threshold}</div></div><button onClick={() => void removeAlert(a.id)} style={smallButtonStyle} disabled={busy}>Remove</button></div>)}</div></div>}
-        {tab === 'auto' && <div style={cardStyle}><h2>🤖 Automation</h2><p style={{ opacity: .7 }}>Strategy monitoring and order execution remain disabled until exchange connection, position sizing, balance checks, price guards and audit trails are fully wired.</p><div style={{ padding: 12, borderRadius: 12, background: '#0b111d', opacity: .8 }}>Status: <strong>Not enabled</strong></div></div>}
+        {tab === 'auto' && <div style={cardStyle}><h2>🤖 Personal AI Agent</h2><p style={{ opacity: .7 }}>Tell CryptoPulse what you want monitored or prepared. Financial execution always requires explicit user authorization and an approved trading connection.</p><textarea value={agentInstruction} onChange={e => setAgentInstruction(e.target.value)} placeholder="Example: Monitor gold 24/7. If it falls 2%, alert me and prepare a $50 buy." style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }} /><button onClick={() => void createAgentTask()} style={{ ...buttonStyle, marginTop: 10, width: '100%' }} disabled={busy || !agentInstruction.trim()}>{busy ? 'Creating…' : '🤖 Create Monitoring Task'}</button>{agentTaskMessage && <div style={{ marginTop: 10, opacity: .8 }}>{agentTaskMessage}</div>}<div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .8 }}>Execution status: <strong>Authorized connections only</strong></div></div>
         {tab === 'portfolio' && <div style={cardStyle}><h2>💼 Portfolio</h2><p style={{ opacity: .65 }}>No exchange account is connected to this Mini App. Portfolio balances and positions will appear here after secure server-side account integration is implemented.</p></div>}
         {tab === 'referral' && <div style={cardStyle}><h2>👥 Referral Center</h2><p style={{ opacity: .7 }}>Invite new users through Telegram and track real server-side referral activity.</p><button onClick={() => { goToSection('referral'); void track('referral_open'); }} style={buttonStyle}>Open Referral Center</button><div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Referral attribution uses Telegram <code>startapp=ref_…</code> links and is recorded when the invited user opens the Mini App.</div></div>}
-        {tab === 'pro' && <div id="pro" style={cardStyle}><h2>⭐ CryptoPulse Pro</h2><p style={{ opacity: .7 }}>Unlock premium CryptoPulse features through Telegram Stars. Review the available Pro membership options in the secure Pro area.</p><button onClick={() => { goToSection('pro'); void track('pro_open'); }} style={{ ...buttonStyle, background: '#d97706' }}>⭐ Open Pro Membership</button><div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Pro membership is handled server-side and payments are processed through Telegram Stars.</div></div>}
+        {tab === 'pro' && <div id="pro" style={cardStyle}>
+          <h2>⭐ CryptoPulse Pro</h2>
+          <p style={{ opacity: .7 }}>Choose the level that matches what you want CryptoPulse to do for you.</p>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {(plans.length ? plans : [
+              { code: 'pro_monthly', name: 'CryptoPulse Pro', description: 'Personal AI assistant, voice tasks, alerts and automation.', price_stars: 299, billing_period: 'monthly', recurring: true, features: ['Personal AI assistant','Voice commands','Smart alerts','Automation workflows'] },
+              { code: 'pro_annual', name: 'CryptoPulse Pro Annual', description: '12-month Pro pass with 50% annual discount.', price_stars: 1794, billing_period: 'annual', recurring: false, features: ['Everything in Pro','12 months access','50% annual discount'] },
+              { code: 'vip_monthly', name: 'CryptoPulse VIP', description: 'Highest-tier personal trading agent.', price_stars: 999, billing_period: 'monthly', recurring: true, features: ['Everything in Pro','Personal Trading Agent','Advanced automation','24/7 task monitoring'] },
+              { code: 'vip_annual', name: 'CryptoPulse VIP Annual', description: '12-month VIP pass with 50% annual discount.', price_stars: 5994, billing_period: 'annual', recurring: false, features: ['Everything in VIP','12 months access','50% annual discount'] }
+            ]).map(plan => <div key={plan.code} style={{ ...cardStyle, marginBottom: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><div><strong>{plan.name}</strong><div style={{ opacity: .65, fontSize: 12, marginTop: 4 }}>{plan.description}</div></div><strong>⭐{plan.price_stars}</strong></div>
+              <div style={{ opacity: .7, fontSize: 12, marginTop: 8 }}>{plan.features.join(' · ')}</div>
+              <button onClick={() => { window.location.href = 'https://t.me/'; void track('plan_select', { plan: plan.code }); }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }}>⭐ Choose {plan.name}</button>
+            </div>)}
+          </div>
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .7, fontSize: 12 }}>Payments are handled server-side through Telegram Stars. The bot invoice flow is the checkout path.</div>
+        </div>
         <nav style={{ position: 'sticky', bottom: 0, marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 5, background: '#0d1320', padding: 8, borderRadius: 16, overflowX: 'auto' }}>{([['home','⌂'],['trade','⚡'],['intelligence','📊'],['watchlist','⭐'],['alerts','🔔'],['auto','🤖'],['portfolio','💼'],['referral','👥']] as const).map(([id,label]) => <button key={id} onClick={() => setTab(id)} style={{ ...smallButtonStyle, opacity: tab === id ? 1 : .55, minWidth: 48 }}>{label}</button>)}</nav>
       </section>
     </main>
