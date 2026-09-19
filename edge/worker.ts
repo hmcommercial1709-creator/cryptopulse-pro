@@ -114,8 +114,12 @@ function getMiniAppBaseUrl(env: Env): string {
 
 function getVersionedMiniAppUrl(baseUrl: string): string {
   const url = new URL(baseUrl);
+  // The Telegram WebApp URL must be /mini?v=release, not ?v=release/mini.
+  // Keep the application path before the query string so Telegram opens the
+  // actual Next.js Mini App route instead of a malformed query URL.
+  url.pathname = url.pathname.replace(/\/$/, '') + '/mini';
   url.searchParams.set('v', MINI_APP_RELEASE);
-  return url.toString().replace(/\/$/, '');
+  return url.toString();
 }
 
 function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 'referral' | 'pro'): string {
@@ -547,7 +551,7 @@ export default {
       // Public browser entrypoint: send Mini App traffic to the real Next.js/OpenNext frontend.
       // POST remains reserved for the Telegram webhook.
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/mini')) {
-        return Response.redirect(`${getVersionedMiniAppUrl(getMiniAppBaseUrl(env))}/mini`, 302);
+        return Response.redirect(getVersionedMiniAppUrl(getMiniAppBaseUrl(env)), 302);
       }
 
       if (request.method !== 'POST') {
