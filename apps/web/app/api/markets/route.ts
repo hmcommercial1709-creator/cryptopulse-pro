@@ -1,19 +1,16 @@
-import { after, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
-const CG_URL = 'https://api.coingecko.com/api/v3/simple/price';
-const COINCAP_URL = 'https://api.coincap.io/v2/assets';
-const BINANCE_URL = 'https://api.binance.com/api/v3/ticker/24hr';
-const REQUEST_TIMEOUT_MS = 4_000;
-const FRESH_TTL_MS = 45_000;
-const STALE_TTL_MS = 10 * 60_000;
+const TIMEOUT_MS = 5000;
+const FRESH_TTL_MS = 30_000;
+const STALE_TTL_MS = 15 * 60_000;
 
 const ASSETS = [
-  { symbol: 'BTC', geckoId: 'bitcoin', coinCapId: 'bitcoin', binanceSymbol: 'BTCUSDT' },
-  { symbol: 'ETH', geckoId: 'ethereum', coinCapId: 'ethereum', binanceSymbol: 'ETHUSDT' },
-  { symbol: 'SOL', geckoId: 'solana', coinCapId: 'solana', binanceSymbol: 'SOLUSDT' },
+  { symbol: 'BTC', gecko: 'bitcoin', coinCap: 'bitcoin', binance: 'BTCUSDT', coinbase: 'BTC-USD' },
+  { symbol: 'ETH', gecko: 'ethereum', coinCap: 'ethereum', binance: 'ETHUSDT', coinbase: 'ETH-USD' },
+  { symbol: 'SOL', gecko: 'solana', coinCap: 'solana', binance: 'SOLUSDT', coinbase: 'SOL-USD' },
 ] as const;
 
 type Market = {
@@ -23,288 +20,165 @@ type Market = {
   volume24h: number | null;
 };
 
-type CacheEntry = {
-  value: Market;
-  freshUntil: number;
-  staleUntil: number;
-};
+type CacheEntry = { value: Market; freshUntil: number; staleUntil: number };
 
-type GeckoBody = Record<string, { usd?: number; usd_24h_change?: number; usd_24h_vol?: number }>;
-type CoinCapAsset = {
-  id?: string;
-  symbol?: string;
-  priceUsd?: string;
-  changePercent24Hr?: string;
-  volumeUsd24Hr?: string;
-};
-type CoinCapBody = { data?: CoinCapAsset[] };
-type BinanceTicker = {
-  symbol?: string;
-  lastPrice?: string;
-  priceChangePercent?: string;
-  quoteVolume?: string;
-};
-type BinanceBody = BinanceTicker | BinanceTicker[];
-
-function edgeCache(): Cache | null {
+function cache(): Cache | null {
   return (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default ?? null;
 }
 
-function cacheKey(symbol: string): Request {
-  return new Request('https://cryptopulse-edge-cache.invalid/markets/' + encodeURIComponent(symbol));
+function key(symbol: string): Request {
+  return new Request('https://cryptopulse-market-cache.invalid/v3/' + symbol);
 }
 
-function validMarket(symbol: string, price: unknown, change24h: unknown, volume24h: unknown): Market | null {
-  const numericPrice = Number(price);
-  if (!Number.isFinite(numericPrice) || numericPrice <= 0) return null;
-  const numericChange = Number(change24h);
-  const numericVolume = Number(volume24h);
+function market(symbol: string, price: unknown, change: unknown, volume: unknown): Market | null {
+  const p = Number(price);
+  if (!Number.isFinite(p) || p <= 0) return null;
+  const c = Number(change);
+  const v = Number(volume);
   return {
     symbol,
-    price: numericPrice,
-    change24h: Number.isFinite(numericChange) ? numericChange : null,
-    volume24h: Number.isFinite(numericVolume) ? numericVolume : null,
+    price: p,
+    change24h: Number.isFinite(c) ? c : null,
+    volume24h: Number.isFinite(v) ? v : null,
   };
 }
 
-async function fetchJson<T>(url: string, provider: string): Promise<T> {
+async function json<T>(url: string, provider: string): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const response = await fetch(url, {
-      cache: 'no-store',
       signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        // CoinGecko can reject generic Worker traffic; identify this server request explicitly.
-        'User-Agent': 'CryptoPulse-Pro/1.0 (+https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev)',
-      },
+      headers: { Accept: 'application/json', 'User-Agent': 'CryptoPulse-Pro/1.0' },
     });
-
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type') ?? 'unknown';
-      throw new Error(`${provider} HTTP ${response.status} (${contentType})`);
-    }
-
-    const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.toLowerCase().includes('application/json')) {
-      throw new Error(`${provider} returned non-JSON content-type: ${contentType || 'missing'}`);
-    }
-
-    try {
-      return await response.json() as T;
-    } catch (error) {
-      throw new Error(
-        `${provider} JSON parse failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    if (!response.ok) throw new Error(provider + ' HTTP ' + response.status);
+    const type = (response.headers.get('content-type') ?? '').toLowerCase();
+    if (!type.includes('json')) throw new Error(provider + ' returned ' + type);
+    return await response.json() as T;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function fetchCoinGecko(): Promise<Map<string, Market>> {
-  const ids = ASSETS.map(asset => asset.geckoId).join(',');
-  const body = await fetchJson<GeckoBody>(
-    `${CG_URL}?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true`,
+async function providerCoinGecko(): Promise<Market[]> {
+  const ids = ASSETS.map(a => a.gecko).join(',');
+  const body = await json<Record<string, { usd?: number; usd_24h_change?: number; usd_24h_vol?: number }>>(
+    'https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(ids) + '&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true',
     'coingecko',
   );
-
-  const result = new Map<string, Market>();
-  for (const asset of ASSETS) {
-    const row = body[asset.geckoId];
-    const market = validMarket(asset.symbol, row?.usd, row?.usd_24h_change, row?.usd_24h_vol);
-    if (market) result.set(asset.symbol, market);
-  }
-  if (result.size !== ASSETS.length) throw new Error('CoinGecko returned incomplete market data');
-  return result;
+  return ASSETS.map(a => market(a.symbol, body[a.gecko]?.usd, body[a.gecko]?.usd_24h_change, body[a.gecko]?.usd_24h_vol)).filter(Boolean) as Market[];
 }
 
-async function fetchCoinCap(): Promise<Map<string, Market>> {
-  const ids = ASSETS.map(asset => asset.coinCapId).join(',');
-  const body = await fetchJson<CoinCapBody>(
-    `${COINCAP_URL}?ids=${encodeURIComponent(ids)}`,
+async function providerCoinCap(): Promise<Market[]> {
+  const ids = ASSETS.map(a => a.coinCap).join(',');
+  const body = await json<{ data?: Array<{ id?: string; priceUsd?: string; changePercent24Hr?: string; volumeUsd24Hr?: string }> }>(
+    'https://api.coincap.io/v2/assets?ids=' + encodeURIComponent(ids),
     'coincap',
   );
-
-  const rows = body.data ?? [];
-  const result = new Map<string, Market>();
-  for (const asset of ASSETS) {
-    const row = rows.find(item => item.id === asset.coinCapId);
-    const market = validMarket(
-      asset.symbol,
-      row?.priceUsd,
-      row?.changePercent24Hr,
-      row?.volumeUsd24Hr,
-    );
-    if (market) result.set(asset.symbol, market);
-  }
-  if (result.size !== ASSETS.length) throw new Error('CoinCap returned incomplete market data');
-  return result;
+  return ASSETS.map(a => {
+    const row = (body.data ?? []).find(x => x.id === a.coinCap);
+    return market(a.symbol, row?.priceUsd, row?.changePercent24Hr, row?.volumeUsd24Hr);
+  }).filter(Boolean) as Market[];
 }
 
-async function fetchBinance(): Promise<Map<string, Market>> {
-  const symbols = encodeURIComponent(JSON.stringify(ASSETS.map(asset => asset.binanceSymbol)));
-  const body = await fetchJson<BinanceBody>(`${BINANCE_URL}?symbols=${symbols}`, 'binance');
-  const rows = Array.isArray(body) ? body : [body];
-
-  const result = new Map<string, Market>();
-  for (const asset of ASSETS) {
-    const row = rows.find(item => item.symbol === asset.binanceSymbol);
-    const market = validMarket(
-      asset.symbol,
-      row?.lastPrice,
-      row?.priceChangePercent,
-      row?.quoteVolume,
-    );
-    if (market) result.set(asset.symbol, market);
-  }
-  if (result.size !== ASSETS.length) throw new Error('Binance returned incomplete market data');
-  return result;
+async function providerBinance(): Promise<Market[]> {
+  const symbols = encodeURIComponent(JSON.stringify(ASSETS.map(a => a.binance)));
+  const body = await json<Array<{ symbol?: string; lastPrice?: string; priceChangePercent?: string; quoteVolume?: string }>>(
+    'https://api.binance.com/api/v3/ticker/24hr?symbols=' + symbols,
+    'binance',
+  );
+  return ASSETS.map(a => {
+    const row = body.find(x => x.symbol === a.binance);
+    return market(a.symbol, row?.lastPrice, row?.priceChangePercent, row?.quoteVolume);
+  }).filter(Boolean) as Market[];
 }
 
-async function fetchProviders(): Promise<{ markets: Map<string, Market>; source: string }> {
-  // Strict sequential fallback: CoinGecko -> CoinCap -> Binance.
-  // Each provider must return the complete BTC/ETH/SOL set before it is accepted.
-  const providers: Array<[string, () => Promise<Map<string, Market>>]> = [
-    ['coingecko', fetchCoinGecko],
-    ['coincap', fetchCoinCap],
-    ['binance', fetchBinance],
+async function providerCoinbase(): Promise<Market[]> {
+  const rows = await Promise.all(ASSETS.map(async a => {
+    const body = await json<{ data?: { amount?: string } }>(
+      'https://api.coinbase.com/v2/prices/' + a.coinbase + '/spot',
+      'coinbase',
+    );
+    return market(a.symbol, body.data?.amount, null, null);
+  }));
+  return rows.filter(Boolean) as Market[];
+}
+
+async function readCached(now: number): Promise<{ markets: Market[]; stale: boolean }> {
+  const c = cache();
+  if (!c) return { markets: [], stale: false };
+  const markets: Market[] = [];
+  let stale = false;
+  for (const a of ASSETS) {
+    const response = await c.match(key(a.symbol));
+    if (!response) continue;
+    try {
+      const entry = await response.json() as CacheEntry;
+      if (!entry?.value || entry.staleUntil <= now) continue;
+      markets.push(entry.value);
+      if (entry.freshUntil <= now) stale = true;
+    } catch { /* ignore bad cache entries */ }
+  }
+  return { markets, stale };
+}
+
+async function writeCache(markets: Market[], now: number): Promise<void> {
+  const c = cache();
+  if (!c) return;
+  await Promise.all(markets.map(m => c.put(key(m.symbol), new Response(JSON.stringify({
+    value: m, freshUntil: now + FRESH_TTL_MS, staleUntil: now + STALE_TTL_MS,
+  }), { headers: { 'content-type': 'application/json' } }))));
+}
+
+async function loadMarkets(): Promise<{ markets: Market[]; source: string; stale: boolean }> {
+  const now = Date.now();
+  const cached = await readCached(now);
+  if (cached.markets.length === ASSETS.length && !cached.stale) {
+    return { markets: cached.markets, source: 'cache', stale: false };
+  }
+
+  const providers: Array<[string, () => Promise<Market[]>]> = [
+    ['coingecko', providerCoinGecko],
+    ['coincap', providerCoinCap],
+    ['binance', providerBinance],
+    ['coinbase', providerCoinbase],
   ];
 
-  const errors: string[] = [];
-  for (const [name, fetcher] of providers) {
+  const merged = new Map<string, Market>(cached.markets.map(m => [m.symbol, m]));
+  const sources: string[] = [];
+  for (const [name, fn] of providers) {
     try {
-      return { markets: await fetcher(), source: name };
+      const rows = await fn();
+      for (const row of rows) if (!merged.has(row.symbol) || merged.get(row.symbol)?.change24h == null) merged.set(row.symbol, row);
+      if (rows.length) sources.push(name);
+      if (merged.size === ASSETS.length) break;
     } catch (error) {
-      errors.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn('Market provider failed:', name, error instanceof Error ? error.message : String(error));
     }
   }
 
-  throw new Error(`All public market providers failed: ${errors.join(' | ')}`);
-}
-
-async function cacheMarkets(markets: Map<string, Market>, now: number): Promise<void> {
-  const cache = edgeCache();
-  if (!cache) return;
-  for (const [symbol, value] of markets) {
-    const entry: CacheEntry = {
-      value,
-      freshUntil: now + FRESH_TTL_MS,
-      staleUntil: now + STALE_TTL_MS,
-    };
-    await cache.put(cacheKey(symbol), new Response(JSON.stringify(entry), {
-      headers: { 'Content-Type': 'application/json' },
-    }));
+  const markets = ASSETS.map(a => merged.get(a.symbol)).filter(Boolean) as Market[];
+  if (markets.length) {
+    await writeCache(markets, now);
+    return { markets, source: sources.join('+') || 'stale-cache', stale: cached.stale };
   }
-}
-
-async function readCache(symbol: string, now: number): Promise<{ value: Market; stale: boolean } | null> {
-  const cache = edgeCache();
-  if (!cache) return null;
-  const response = await cache.match(cacheKey(symbol));
-  if (!response) return null;
-  try {
-    const entry = await response.json() as CacheEntry;
-    if (!entry?.staleUntil || entry.staleUntil <= now || !entry.value) return null;
-    return { value: entry.value, stale: entry.freshUntil <= now };
-  } catch {
-    return null;
-  }
-}
-
-async function getResilientMarkets(): Promise<{ markets: Market[]; stale: boolean; source: string }> {
-  const now = Date.now();
-  const result = new Map<string, Market>();
-  let hasStale = false;
-  const missing: typeof ASSETS[number]['symbol'][] = [];
-
-  for (const asset of ASSETS) {
-    const cached = await readCache(asset.symbol, now);
-    if (cached && !cached.stale) result.set(asset.symbol, cached.value);
-    else if (cached) {
-      result.set(asset.symbol, cached.value);
-      hasStale = true;
-    } else {
-      missing.push(asset.symbol);
-    }
-  }
-
-  if (missing.length === 0 && hasStale) {
-    after(async () => {
-      await fetchProviders()
-        .then(({ markets }) => cacheMarkets(markets, Date.now()))
-        .catch(error => console.warn('Background market refresh failed; stale cache retained:', error));
-    });
-    return {
-      markets: ASSETS.map(asset => result.get(asset.symbol)!).filter(Boolean),
-      stale: true,
-      source: 'stale-cache',
-    };
-  }
-
-  if (missing.length === 0) {
-    return {
-      markets: ASSETS.map(asset => result.get(asset.symbol)!),
-      stale: false,
-      source: 'cache',
-    };
-  }
-
-  const fresh = await fetchProviders();
-  await cacheMarkets(fresh.markets, Date.now());
-  for (const asset of ASSETS) {
-    const value = fresh.markets.get(asset.symbol);
-    if (value) result.set(asset.symbol, value);
-  }
-
-  return {
-    markets: ASSETS.map(asset => result.get(asset.symbol)!),
-    stale: hasStale,
-    source: fresh.source,
-  };
+  return { markets: [], source: 'unavailable', stale: false };
 }
 
 export async function GET() {
-  try {
-    const { markets, stale, source } = await getResilientMarkets();
-    return NextResponse.json(
-      {
-        source,
-        mode: stale ? 'stale-while-revalidate' : 'live',
-        updatedAt: new Date().toISOString(),
-        markets,
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-          'X-Market-Resilience': stale ? 'stale-cache' : 'sequential-public-providers',
-          'X-Market-Source': source,
-        },
-      },
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('Resilient market API failed; returning empty fallback:', message);
-
-    // Keep the Mini App interactive even when every upstream provider is unavailable.
-    // Returning 200 + an empty array lets the UI render its unavailable-state normally
-    // instead of turning a market-data outage into an API exception/503.
-    return NextResponse.json(
-      {
-        source: 'fallback-empty',
-        mode: 'fallback',
-        updatedAt: new Date().toISOString(),
-        markets: [],
-      },
-      {
-        status: 200,
-        headers: {
-          'Cache-Control': 'no-store',
-          'X-Market-Resilience': 'empty-fallback',
-          'X-Market-Source': 'fallback-empty',
-        },
-      },
-    );
-  }
+  const result = await loadMarkets();
+  return NextResponse.json({
+    source: result.source,
+    mode: result.markets.length ? (result.stale ? 'stale-cache' : 'live') : 'fallback',
+    updatedAt: new Date().toISOString(),
+    markets: result.markets,
+    error: result.markets.length ? undefined : 'Live market providers are temporarily unavailable.',
+  }, {
+    status: 200,
+    headers: {
+      'Cache-Control': 'no-store',
+      'X-Market-Source': result.source,
+      'X-Market-Count': String(result.markets.length),
+    },
+  });
 }
