@@ -107,9 +107,9 @@ export default function MiniTradingTerminal() {
         headers: authHeaders(),
         body: JSON.stringify({ instruction: agentInstruction.trim(), requiresConfirmation: true }),
       });
-      const body = await response.json() as { message?: string };
+      const body = await response.json() as { message?: string; plan?: string; trial?: boolean; expiresAt?: string };
       if (!response.ok) throw new Error(body.message ?? 'Could not create the task.');
-      setAgentTaskMessage('✅ Task created. CryptoPulse will keep monitoring it.');
+      setAgentTaskMessage(body.trial ? `✅ Your free AI task is active for 24 hours. After that it stops and CryptoPulse will show you the upgrade options.` : `✅ ${body.plan === 'vip' ? 'VIP' : 'Pro'} AI task created. CryptoPulse will keep monitoring it according to your task settings.`);
       setAgentInstruction('');
       void track('agent_intent', { instructionLength: agentInstruction.length });
     } catch (err) {
@@ -226,7 +226,20 @@ export default function MiniTradingTerminal() {
         {tab === 'portfolio' && <div style={cardStyle}><h2>💼 Portfolio</h2><p style={{ opacity: .65 }}>No exchange account is connected to this Mini App. Portfolio balances and positions will appear here after secure server-side account integration is implemented.</p></div>}
         {tab === 'referral' && <div style={cardStyle}><h2>👥 Referral Center</h2><p style={{ opacity: .7 }}>Invite new users through Telegram and track real server-side referral activity.</p><button onClick={() => { goToSection('referral'); void track('referral_open'); }} style={buttonStyle}>Open Referral Center</button><div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Referral attribution uses Telegram <code>startapp=ref_…</code> links and is recorded when the invited user opens the Mini App.</div></div>}
         {tab === 'pro' && <div id="pro" style={cardStyle}>
-          <h2>⭐ CryptoPulse Pro</h2>
+          <h2>👑 CryptoPulse VIP — Personal Trading Agent</h2>
+          <p style={{ opacity: .78 }}>VIP is designed to be open and simple: you do not need to know trading, APIs, indicators, or complicated menus. Tell CryptoPulse what you want in text or voice and the AI turns your request into a task or workflow.</p>
+          <div style={{ ...cardStyle, background: '#151026', borderColor: '#5b3aa8' }}>
+            <strong>🎤 You can say things like:</strong>
+            <div style={{ display: 'grid', gap: 6, marginTop: 8, opacity: .85, fontSize: 13 }}>
+              <span>• “Monitor gold and alert me if it drops 2%.”</span>
+              <span>• “Compare BTC and ETH every 4 hours.”</span>
+              <span>• “Analyze this trade before I enter.”</span>
+              <span>• “Create an automation for my market routine.”</span>
+              <span>• “I cannot find the tool I need — design a task for me.”</span>
+            </div>
+            <p style={{ marginBottom: 0, opacity: .72, fontSize: 12 }}>VIP unlocks Personal AI Agent, advanced automation, continuous monitoring, voice-driven workflows, custom tasks and authorized trading workflows. Real-money execution always requires an approved connection and explicit authorization.</p>
+          </div>
+          <h2 style={{ marginTop: 18 }}>⭐ CryptoPulse Pro</h2>
           <p style={{ opacity: .7 }}>Choose the level that matches what you want CryptoPulse to do for you.</p>
           <div style={{ display: 'grid', gap: 10 }}>
             {(plans.length ? plans : [
