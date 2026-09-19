@@ -62,11 +62,7 @@ async function json<T>(url: string, provider: string): Promise<T> {
 
 async function providerCoinMarketCap(apiKey: string): Promise<Market[]> {
   if (!apiKey.trim()) return [];
-  const body = await json<{
-    data: Record<string, {
-      quote: { USD: { price: number; percent_change_24h: number; volume_24h: number }
-    }>
-  }>(
+  const body = await json<{ data: Record<string, any> }>(
     'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC,ETH,SOL&convert=USD',
     'coinmarketcap',
   );
