@@ -32,13 +32,13 @@ function key(symbol: string): Request {
 function market(symbol: string, price: unknown, change: unknown, volume: unknown): Market | null {
   const p = Number(price);
   if (!Number.isFinite(p) || p <= 0) return null;
-  const c = Number(change);
-  const v = Number(volume);
+  const c = change == null ? null : Number(change);
+  const v = volume == null ? null : Number(volume);
   return {
     symbol,
     price: p,
-    change24h: Number.isFinite(c) ? c : null,
-    volume24h: Number.isFinite(v) ? v : null,
+    change24h: c != null && Number.isFinite(c) ? c : null,
+    volume24h: v != null && Number.isFinite(v) ? v : null,
   };
 }
 
@@ -184,7 +184,7 @@ async function loadMarkets(apiKey: string): Promise<{ markets: Market[]; source:
   const markets = ASSETS.map(a => merged.get(a.symbol)).filter(Boolean) as Market[];
   if (markets.length) {
     await writeCache(markets, now);
-    return { markets, source: sources.join('+') || 'stale-cache', stale: cached.stale };
+    return { markets, source: sources.join('+') || 'stale-cache', stale: sources.length === 0 };
   }
   return { markets: [], source: 'unavailable', stale: false };
 }
