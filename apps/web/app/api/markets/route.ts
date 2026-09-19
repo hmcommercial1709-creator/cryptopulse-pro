@@ -113,13 +113,20 @@ async function fetchCoinGecko(): Promise<Map<string, Market>> {
 
 async function fetchProviders(): Promise<Map<string, Market>> {
   const result = new Map<string, Market>();
-  const settled = await Promise.allSettled([fetchCoinMarketCap(), fetchCoinGecko()]);
+  const providers: Promise<Map<string, Market>>[] = [fetchCoinGecko()];
 
+  // CoinGecko is always available as the no-key baseline. CoinMarketCap is
+  // an optional higher-redundancy source when its Worker secret is configured.
+  if (process.env.MARKET_DATA_API_KEY?.trim()) {
+    providers.unshift(fetchCoinMarketCap());
+  }
+
+  const settled = await Promise.allSettled(providers);
   for (const provider of settled) {
     if (provider.status !== 'fulfilled') continue;
     for (const [symbol, market] of provider.value) {
-      // Prefer CMC when both providers return the same asset because it supplies
-      // richer quote metadata, while CoinGecko remains an immediate fallback.
+      // Prefer CMC when configured and healthy because it supplies richer
+      // quote metadata; otherwise CoinGecko becomes the primary source.
       if (!result.has(symbol)) result.set(symbol, market);
     }
   }
@@ -179,8 +186,6 @@ async function getResilientMarkets(): Promise<{ markets: Market[]; stale: boolea
     }
   }
 
-  // Serve stale data immediately and refresh it asynchronously. Cold-start requests
-  // wait only for the parallel providers, never for one provider behind another.
   if (missing.length === 0 && hasStale) {
     after(async () => {
       await fetchProviders().then(values => cacheMarkets(values, Date.now())).catch(error => {
