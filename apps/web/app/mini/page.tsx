@@ -9,9 +9,9 @@ type AlertItem = { id: string; symbol: string; condition: 'above' | 'below' | 'c
 type Tab = 'home' | 'trade' | 'intelligence' | 'watchlist' | 'alerts' | 'auto' | 'portfolio' | 'referral' | 'pro';
 type HashSection = 'markets' | 'signals' | 'referral' | 'pro';
 
-declare global {
-  interface Window { Telegram?: { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void; ready?: () => void; expand?: () => void } } }
-}
+
+type TelegramRuntime = { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void; ready?: () => void; expand?: () => void } };
+const getTelegramWebApp = (): TelegramRuntime['WebApp'] => (window as unknown as { Telegram?: TelegramRuntime }).Telegram?.WebApp;
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 });
@@ -50,7 +50,7 @@ export default function MiniTradingTerminal() {
 
   const authHeaders = useCallback((): HeadersInit => ({
     'Content-Type': 'application/json',
-    'x-telegram-init-data': window.Telegram?.WebApp?.initData ?? '',
+    'x-telegram-init-data': getTelegramWebApp()?.initData ?? '',
   }), []);
 
   const track = useCallback(async (event: string, metadata: Record<string, unknown> = {}) => {
@@ -88,7 +88,7 @@ export default function MiniTradingTerminal() {
   }, []);
 
   const loadUserData = useCallback(async () => {
-    if (!window.Telegram?.WebApp?.initData) return;
+    if (!getTelegramWebApp()?.initData) return;
     try {
       const headers = authHeaders();
       const [watchResponse, alertResponse] = await Promise.all([
@@ -100,14 +100,14 @@ export default function MiniTradingTerminal() {
   }, [authHeaders]);
 
   useEffect(() => {
-    try { window.Telegram?.WebApp?.ready?.(); window.Telegram?.WebApp?.expand?.(); } catch { /* Telegram runtime is optional outside Telegram */ }
+    try { getTelegramWebApp()?.ready?.(); getTelegramWebApp()?.expand?.(); } catch { /* Telegram runtime is optional outside Telegram */ }
     void loadUserData(); void track('mini_open');
     applyHashRoute(window.location.hash);
     const onHashChange = () => applyHashRoute(window.location.hash);
     window.addEventListener('hashchange', onHashChange);
     try {
       const startParam = (new URLSearchParams(window.location.search).get('tgWebAppStartParam') ?? '').trim().slice(0, 64);
-      const initData = window.Telegram?.WebApp?.initData ?? '';
+      const initData = getTelegramWebApp()?.initData ?? '';
       if (startParam.startsWith('ref_')) setTab('referral');
       if (startParam && initData) {
         const key = `cryptopulse:startapp:${startParam}`;
@@ -168,7 +168,7 @@ export default function MiniTradingTerminal() {
       const response = await fetch('/api/share', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ symbol: selected.symbol, cardType: 'market', payload: { text, price: selected.price, change24h: selected.change24h } }) });
       if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? 'Share link failed.');
       const body = (await response.json()) as { shareUrl: string };
-      if (window.Telegram?.WebApp?.openTelegramLink) window.Telegram.WebApp.openTelegramLink(body.shareUrl); else window.open(body.shareUrl, '_blank', 'noopener,noreferrer');
+      if (getTelegramWebApp()?.openTelegramLink) window.Telegram.WebApp.openTelegramLink(body.shareUrl); else window.open(body.shareUrl, '_blank', 'noopener,noreferrer');
       setShareMessage('Share card ready.'); void track('first_share', { symbol: selected.symbol, cardType: 'market' });
     } catch (err) { setError(err instanceof Error ? err.message : 'Share link failed.'); }
     finally { setBusy(false); }
