@@ -16,7 +16,14 @@ const getTelegramWebApp = (): TelegramRuntime['WebApp'] => (window as unknown as
 
 function getTelegramInitData(): string {
   const direct = getTelegramWebApp()?.initData?.trim();
-  if (direct) return direct;
+  if (direct) {
+    try { window.sessionStorage.setItem('cryptopulse:telegram-init-data', direct); } catch { /* storage may be unavailable */ }
+    return direct;
+  }
+  try {
+    const cached = window.sessionStorage.getItem('cryptopulse:telegram-init-data')?.trim();
+    if (cached) return cached;
+  } catch { /* storage may be unavailable */ }
   // Telegram also exposes the signed init payload in tgWebAppData inside the
   // WebView URL fragment. Use it only as a fallback; the server still validates
   // the HMAC signature, so this never trusts client-supplied user identity.
