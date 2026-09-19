@@ -105,7 +105,7 @@ const DEFAULT_MINI_APP_URL = 'https://cryptopulse-pro-mini-app.hmcommercial1709.
 // Cache-bust Telegram Mini App links whenever the deployed frontend changes.
 // Telegram can retain an older Web App document for an existing URL, so every
 // production frontend release gets an explicit version query string.
-const MINI_APP_RELEASE = '2026-09-19-02';
+const MINI_APP_RELEASE = '2026-09-19-03';
 
 function getMiniAppBaseUrl(env: Env): string {
   const configured = String(env.MINI_APP_URL ?? '').trim().replace(/\/+$/, '');
@@ -119,7 +119,27 @@ function getVersionedMiniAppUrl(baseUrl: string): string {
 }
 
 function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 'referral' | 'pro'): string {
-  return `${getVersionedMiniAppUrl(baseUrl)}#${section}`;
+  const url = new URL(getVersionedMiniAppUrl(baseUrl));
+  url.hash = section;
+  return url.toString();
+}
+
+async function selfHealTelegramConfiguration(env: Env, origin: string): Promise<void> {
+  const bot = new Bot(env.BOT_TOKEN);
+  const miniAppUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env));
+  const webhookUrl = `${origin.replace(/\/$/, '')}/`;
+  await bot.api.setWebhook(webhookUrl, {
+    secret_token: String(env.TELEGRAM_WEBHOOK_SECRET ?? '').trim() || undefined,
+    allowed_updates: ['message', 'callback_query', 'pre_checkout_query'],
+    drop_pending_updates: false,
+  });
+  await bot.api.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: 'Open CryptoPulse',
+      web_app: { url: miniAppUrl },
+    },
+  });
 }
 
 let cachedBotToken = '';
@@ -438,7 +458,7 @@ async function getBot(env: Env): Promise<Bot> {
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
       const miniAppUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env));
-      const url = miniAppUrl ? `${miniAppUrl}/mini#referral` : null;
+      const url = miniAppUrl ? `${miniAppUrl}#referral` : null;
 
       await ctx.editMessageText(
         `${copy.referralCenter}\n\n${copy.referralBody}`,
@@ -452,7 +472,7 @@ async function getBot(env: Env): Promise<Bot> {
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
       const miniAppUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env));
-      const url = miniAppUrl ? `${miniAppUrl}/mini#pro` : null;
+      const url = miniAppUrl ? `${miniAppUrl}#pro` : null;
 
       await ctx.editMessageText(
         `${copy.proTitle}\n\n${copy.proBody}`,
@@ -510,6 +530,11 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/health' || url.pathname === '/healthz') {
+        try {
+          await selfHealTelegramConfiguration(env, url.origin);
+        } catch (error) {
+          console.error('Telegram self-heal failed:', error);
+        }
         return Response.json({
           ok: true,
           service: 'cryptopulse-edge',
