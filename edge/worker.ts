@@ -102,14 +102,24 @@ function t(locale: Locale) {
 }
 
 const DEFAULT_MINI_APP_URL = 'https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev';
+// Cache-bust Telegram Mini App links whenever the deployed frontend changes.
+// Telegram can retain an older Web App document for an existing URL, so every
+// production frontend release gets an explicit version query string.
+const MINI_APP_RELEASE = '2026-09-19-02';
 
 function getMiniAppBaseUrl(env: Env): string {
   const configured = String(env.MINI_APP_URL ?? '').trim().replace(/\/+$/, '');
   return configured || DEFAULT_MINI_APP_URL;
 }
 
+function getVersionedMiniAppUrl(baseUrl: string): string {
+  const url = new URL(baseUrl);
+  url.searchParams.set('v', MINI_APP_RELEASE);
+  return url.toString().replace(/\/$/, '');
+}
+
 function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 'referral' | 'pro'): string {
-  return `${baseUrl}#${section}`;
+  return `${getVersionedMiniAppUrl(baseUrl)}#${section}`;
 }
 
 let cachedBotToken = '';
@@ -395,7 +405,7 @@ async function getBot(env: Env): Promise<Bot> {
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
       const keyboard = new InlineKeyboard();
-      const miniAppUrl = getMiniAppBaseUrl(env);
+      const miniAppUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env));
 
       if (miniAppUrl) {
         keyboard
@@ -512,7 +522,7 @@ export default {
       // Public browser entrypoint: send Mini App traffic to the real Next.js/OpenNext frontend.
       // POST remains reserved for the Telegram webhook.
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/mini')) {
-        return Response.redirect(`${getMiniAppBaseUrl(env)}/mini`, 302);
+        return Response.redirect(`${getVersionedMiniAppUrl(getMiniAppBaseUrl(env))}/mini`, 302);
       }
 
       if (request.method !== 'POST') {
