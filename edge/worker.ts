@@ -383,6 +383,46 @@ async function processReferral(
   }
 }
 
+type SubscriptionPlan = {
+  code: string;
+  name: string;
+  description: string;
+  price_stars: number;
+  billing_period: 'monthly' | 'annual';
+  recurring: boolean;
+  features: string[];
+};
+
+async function getSubscriptionPlans(env: Env): Promise<SubscriptionPlan[]> {
+  const { base, headers } = getSupabase(env);
+  const response = await fetch(
+    `${base}cp_subscription_plans?active=eq.true&select=code,name,description,price_stars,billing_period,recurring,features&order=price_stars.asc`,
+    { headers },
+  );
+  if (!response.ok) throw new Error(`Subscription plans lookup failed (${response.status}).`);
+  return await response.json() as SubscriptionPlan[];
+}
+
+function starsPlanKeyboard(plans: SubscriptionPlan[], miniAppBaseUrl: string): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const plan of plans) {
+    keyboard.text(`${plan.name} · ⭐${plan.price_stars}`, `buy_plan:${plan.code}`).row();
+  }
+  keyboard.webApp('📊 Open CryptoPulse', getVersionedMiniAppUrl(miniAppBaseUrl));
+  return keyboard;
+}
+
+async function sendStarsInvoice(env: Env, ctx: any, plan: SubscriptionPlan): Promise<void> {
+  await ctx.replyWithInvoice(
+    plan.name,
+    plan.description,
+    `plan:${plan.code}`,
+    'XTR',
+    [{ label: plan.name, amount: plan.price_stars }],
+    { provider_token: '' },
+  );
+}
+
 async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promise<void> {
   const payment = update.message?.successful_payment;
   const telegramUserId = update.message?.from?.id;
@@ -531,6 +571,29 @@ async function getBot(env: Env): Promise<Bot> {
       await processSuccessfulPayment(env, ctx.update as TelegramUpdate);
       const locale = getLocale(ctx.from?.language_code);
       await ctx.reply(t(locale).paymentSuccess);
+    });
+
+    bot.command('plans', async (ctx) => {
+      const plans = await getSubscriptionPlans(env);
+      const locale = getLocale(ctx.from?.language_code);
+      const intro = locale === 'ar'
+        ? '⭐ اختر الخطة المناسبة لك. Pro يبدأ من 299 ⭐، وVIP هو المستوى الأعلى.'
+        : '⭐ Choose your plan. Pro starts at 299 ⭐, while VIP is the highest tier.';
+      await ctx.reply(intro, {
+        reply_markup: starsPlanKeyboard(plans, getMiniAppBaseUrl(env)),
+      });
+    });
+
+    bot.callbackQuery(/^buy_plan:(.+)$/, async (ctx) => {
+      const code = String(ctx.match?.[1] ?? '').trim();
+      const plans = await getSubscriptionPlans(env);
+      const plan = plans.find((item) => item.code === code);
+      if (!plan) {
+        await ctx.answerCallbackQuery({ text: 'Plan unavailable.', show_alert: true }).catch(() => undefined);
+        return;
+      }
+      await ctx.answerCallbackQuery().catch(() => undefined);
+      await sendStarsInvoice(env, ctx, plan);
     });
 
     bot.catch((error) => {
