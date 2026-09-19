@@ -225,36 +225,42 @@ export default function MiniTradingTerminal() {
         {tab === 'auto' && <div style={cardStyle}><h2>🤖 Personal AI Agent</h2><p style={{ opacity: .7 }}>Tell CryptoPulse what you want monitored or prepared. Financial execution always requires explicit user authorization and an approved trading connection.</p><textarea value={agentInstruction} onChange={e => setAgentInstruction(e.target.value)} placeholder="Example: Monitor gold 24/7. If it falls 2%, alert me and prepare a $50 buy." style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }} /><button onClick={() => void createAgentTask()} style={{ ...buttonStyle, marginTop: 10, width: '100%' }} disabled={busy || !agentInstruction.trim()}>{busy ? 'Creating…' : '🤖 Create Monitoring Task'}</button>{agentTaskMessage && <div style={{ marginTop: 10, opacity: .8 }}>{agentTaskMessage}</div>}<div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .8 }}>Execution status: <strong>Authorized connections only</strong></div></div>}
         {tab === 'portfolio' && <div style={cardStyle}><h2>💼 Portfolio</h2><p style={{ opacity: .65 }}>No exchange account is connected to this Mini App. Portfolio balances and positions will appear here after secure server-side account integration is implemented.</p></div>}
         {tab === 'referral' && <div style={cardStyle}><h2>👥 Referral Center</h2><p style={{ opacity: .7 }}>Invite new users through Telegram and track real server-side referral activity.</p><button onClick={() => { goToSection('referral'); void track('referral_open'); }} style={buttonStyle}>Open Referral Center</button><div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Referral attribution uses Telegram <code>startapp=ref_…</code> links and is recorded when the invited user opens the Mini App.</div></div>}
-        {tab === 'pro' && <div id="pro" style={cardStyle}>
-          <h2>👑 CryptoPulse VIP — Personal Trading Agent</h2>
-          <p style={{ opacity: .78 }}>VIP is designed to be open and simple: you do not need to know trading, APIs, indicators, or complicated menus. Tell CryptoPulse what you want in text or voice and the AI turns your request into a task or workflow.</p>
-          <div style={{ ...cardStyle, background: '#151026', borderColor: '#5b3aa8' }}>
-            <strong>🎤 You can say things like:</strong>
-            <div style={{ display: 'grid', gap: 6, marginTop: 8, opacity: .85, fontSize: 13 }}>
-              <span>• “Monitor gold and alert me if it drops 2%.”</span>
-              <span>• “Compare BTC and ETH every 4 hours.”</span>
-              <span>• “Analyze this trade before I enter.”</span>
-              <span>• “Create an automation for my market routine.”</span>
-              <span>• “I cannot find the tool I need — design a task for me.”</span>
+        {tab === 'pro' && (
+          <div id="pro" style={cardStyle}>
+            <h2>👑 CryptoPulse VIP — Personal Trading Agent</h2>
+            <p style={{ opacity: 0.78 }}>VIP is open and simple. Tell CryptoPulse what you want in text or voice and the AI turns it into a task or workflow.</p>
+            <div style={{ ...cardStyle, background: '#151026', borderColor: '#5b3aa8' }}>
+              <strong>🎤 Examples</strong>
+              <div style={{ display: 'grid', gap: 6, marginTop: 8, opacity: 0.85, fontSize: 13 }}>
+                <span>• Monitor gold and alert me if it drops 2%.</span>
+                <span>• Compare BTC and ETH every 4 hours.</span>
+                <span>• Analyze this trade before I enter.</span>
+                <span>• Create an automation for my market routine.</span>
+                <span>• Design a task when I cannot find the right tool.</span>
+              </div>
+              <p style={{ marginBottom: 0, opacity: 0.72, fontSize: 12 }}>Real-money execution always requires an approved connection and explicit authorization.</p>
             </div>
-            <p style={{ marginBottom: 0, opacity: .72, fontSize: 12 }}>VIP unlocks Personal AI Agent, advanced automation, continuous monitoring, voice-driven workflows, custom tasks and authorized trading workflows. Real-money execution always requires an approved connection and explicit authorization.</p>
+            <h2 style={{ marginTop: 18 }}>⭐ CryptoPulse Pro & VIP</h2>
+            <p style={{ opacity: 0.7 }}>Choose a plan. Payments are handled through Telegram Stars.</p>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {(plans.length ? plans : [
+                { code: 'pro_monthly', name: 'CryptoPulse Pro', description: 'Personal AI assistant and automation.', price_stars: 299, billing_period: 'monthly', recurring: true, features: ['AI assistant', 'Voice commands', 'Smart alerts'] },
+                { code: 'pro_annual', name: 'CryptoPulse Pro Annual', description: '12-month Pro pass with 50% annual discount.', price_stars: 1794, billing_period: 'annual', recurring: false, features: ['Everything in Pro', '12 months', '50% discount'] },
+                { code: 'vip_monthly', name: 'CryptoPulse VIP', description: 'Personal Trading Agent and advanced automation.', price_stars: 999, billing_period: 'monthly', recurring: true, features: ['Everything in Pro', 'Personal Trading Agent', '24/7 monitoring'] },
+                { code: 'vip_annual', name: 'CryptoPulse VIP Annual', description: '12-month VIP pass with 50% annual discount.', price_stars: 5994, billing_period: 'annual', recurring: false, features: ['Everything in VIP', '12 months', '50% discount'] }
+              ]).map((plan) => (
+                <div key={plan.code} style={{ ...cardStyle, marginBottom: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                    <div><strong>{plan.name}</strong><div style={{ opacity: 0.65, fontSize: 12, marginTop: 4 }}>{plan.description}</div></div>
+                    <strong>⭐{plan.price_stars}</strong>
+                  </div>
+                  <div style={{ opacity: 0.7, fontSize: 12, marginTop: 8 }}>{plan.features.join(' · ')}</div>
+                  <button onClick={() => { const tg = getTelegramWebApp(); if (tg?.sendData) tg.sendData(JSON.stringify({ type: 'buy_plan', plan: plan.code })); else setAgentTaskMessage('Open the bot and use /plans to purchase this plan.'); void track('plan_select', { plan: plan.code }); }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }}>⭐ Choose {plan.name}</button>
+                </div>
+              ))}
+            </div>
           </div>
-          <h2 style={{ marginTop: 18 }}>⭐ CryptoPulse Pro</h2>
-          <p style={{ opacity: .7 }}>Choose the level that matches what you want CryptoPulse to do for you.</p>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {(plans.length ? plans : [
-              { code: 'pro_monthly', name: 'CryptoPulse Pro', description: 'Personal AI assistant, voice tasks, alerts and automation.', price_stars: 299, billing_period: 'monthly', recurring: true, features: ['Personal AI assistant','Voice commands','Smart alerts','Automation workflows'] },
-              { code: 'pro_annual', name: 'CryptoPulse Pro Annual', description: '12-month Pro pass with 50% annual discount.', price_stars: 1794, billing_period: 'annual', recurring: false, features: ['Everything in Pro','12 months access','50% annual discount'] },
-              { code: 'vip_monthly', name: 'CryptoPulse VIP', description: 'Highest-tier personal trading agent.', price_stars: 999, billing_period: 'monthly', recurring: true, features: ['Everything in Pro','Personal Trading Agent','Advanced automation','24/7 task monitoring'] },
-              { code: 'vip_annual', name: 'CryptoPulse VIP Annual', description: '12-month VIP pass with 50% annual discount.', price_stars: 5994, billing_period: 'annual', recurring: false, features: ['Everything in VIP','12 months access','50% annual discount'] }
-            ]).map(plan => <div key={plan.code} style={{ ...cardStyle, marginBottom: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><div><strong>{plan.name}</strong><div style={{ opacity: .65, fontSize: 12, marginTop: 4 }}>{plan.description}</div></div><strong>⭐{plan.price_stars}</strong></div>
-              <div style={{ opacity: .7, fontSize: 12, marginTop: 8 }}>{plan.features.join(' · ')}</div>
-              <button onClick={() => { const tg = getTelegramWebApp(); if (tg?.sendData) tg.sendData(JSON.stringify({ type: 'buy_plan', plan: plan.code })); else setAgentTaskMessage('Open the bot and use /plans to purchase this plan.'); void track('plan_select', { plan: plan.code }); }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }}>⭐ Choose {plan.name}</button>
-            </div>)}
-          </div>
-          <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .7, fontSize: 12 }}>Payments are handled server-side through Telegram Stars. The bot invoice flow is the checkout path.</div>
-        </div>
+        )}
         <nav style={{ position: 'sticky', bottom: 0, marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 5, background: '#0d1320', padding: 8, borderRadius: 16, overflowX: 'auto' }}>{([['home','⌂'],['trade','⚡'],['intelligence','📊'],['watchlist','⭐'],['alerts','🔔'],['auto','🤖'],['portfolio','💼'],['referral','👥']] as const).map(([id,label]) => <button key={id} onClick={() => setTab(id)} style={{ ...smallButtonStyle, opacity: tab === id ? 1 : .55, minWidth: 48 }}>{label}</button>)}</nav>
       </section>
     </main>
