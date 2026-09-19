@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Market = { symbol: string; price: number; change24h: number; volume24h: number | null };
 type MarketsResponse = { source: string; updatedAt: string; markets: Market[]; error?: string };
