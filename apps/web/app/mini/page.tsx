@@ -23,7 +23,8 @@ export default function MiniTradingTerminal() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [marketError, setMarketError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [updatedAt, setUpdatedAt] = useState('');
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
@@ -66,14 +67,24 @@ export default function MiniTradingTerminal() {
   }, [authHeaders]);
 
   const loadMarkets = useCallback(async () => {
+    // Market I/O is intentionally isolated to the Markets view. Other tabs never
+    // depend on this request and must remain interactive during provider outages.
     try {
       setLoading(true);
+      setMarketError('');
       const response = await fetch('/api/markets', { cache: 'no-store' });
       const body = (await response.json()) as MarketsResponse;
-      if (!response.ok || !body.markets?.length) throw new Error(body.error ?? 'Market data is temporarily unavailable.');
-      setMarkets(body.markets); setUpdatedAt(body.updatedAt); setError('');
-    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to load market data.'); }
-    finally { setLoading(false); }
+      if (!response.ok || !body.markets?.length) {
+        setMarketError(body.error ?? 'Live market data is temporarily unavailable.');
+        return;
+      }
+      setMarkets(body.markets);
+      setUpdatedAt(body.updatedAt);
+    } catch {
+      setMarketError('Live market data is temporarily unavailable.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const loadUserData = useCallback(async () => {
@@ -89,7 +100,7 @@ export default function MiniTradingTerminal() {
   }, [authHeaders]);
 
   useEffect(() => {
-    void loadMarkets(); void loadUserData(); void track('mini_open');
+    void loadUserData(); void track('mini_open');
     applyHashRoute(window.location.hash);
     const onHashChange = () => applyHashRoute(window.location.hash);
     window.addEventListener('hashchange', onHashChange);
@@ -105,12 +116,19 @@ export default function MiniTradingTerminal() {
         }
       }
     } catch { /* attribution must never affect Mini App availability */ }
-    const timer = window.setInterval(() => void loadMarkets(), 45_000);
     return () => {
-      window.clearInterval(timer);
       window.removeEventListener('hashchange', onHashChange);
     };
-  }, [applyHashRoute, loadMarkets, loadUserData, track]);
+  }, [applyHashRoute, loadUserData, track]);
+
+  useEffect(() => {
+    // Only the Markets view fetches market prices. Referral, Pro, Signals and
+    // all other tabs are completely independent from market-provider state.
+    if (tab !== 'home') return;
+    void loadMarkets();
+    const timer = window.setInterval(() => void loadMarkets(), 45_000);
+    return () => window.clearInterval(timer);
+  }, [tab, loadMarkets]);
 
   const selected = useMemo(() => markets.find((m) => m.symbol === selectedSymbol) ?? markets[0], [markets, selectedSymbol]);
   const freshness = updatedAt ? Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000)) : null;
@@ -158,16 +176,15 @@ export default function MiniTradingTerminal() {
   return (
     <main style={{ minHeight: '100vh', background: '#070b14', color: '#f7f9fc', fontFamily: 'system-ui, sans-serif', padding: 16 }}>
       <section style={{ maxWidth: 620, margin: '0 auto' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 18 }}><div><strong style={{ fontSize: 22 }}>CryptoPulse</strong><div style={{ opacity: .6, fontSize: 12 }}>Telegram Market Intelligence</div></div><button onClick={() => void loadMarkets()} style={buttonStyle} disabled={loading}>{loading ? 'Loading…' : '↻ Refresh'}</button></header>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 18 }}><div><strong style={{ fontSize: 22 }}>CryptoPulse</strong><div style={{ opacity: .6, fontSize: 12 }}>Telegram Market Intelligence</div></div>{tab === 'home' && <button onClick={() => void loadMarkets()} style={buttonStyle} disabled={loading}>{loading ? 'Loading…' : '↻ Refresh'}</button>}</header>
         <section aria-label="CryptoPulse sections" style={quickNavStyle}>
           <button onClick={() => goToSection('markets')} style={{ ...quickNavButtonStyle, background: '#1769e0' }}>📈 Markets</button>
           <button onClick={() => goToSection('signals')} style={{ ...quickNavButtonStyle, background: '#7c3aed' }}>⚡ Signals</button>
           <button onClick={() => goToSection('referral')} style={{ ...quickNavButtonStyle, background: '#0f9f6e' }}>💰 Referral</button>
           <button onClick={() => goToSection('pro')} style={{ ...quickNavButtonStyle, background: '#d97706' }}>⭐ Pro</button>
         </section>
-        {error && <div style={{ ...cardStyle, borderColor: '#6d2330' }}><strong>Action unavailable</strong><p style={{ opacity: .75 }}>{error}</p><button onClick={() => setError('')} style={smallButtonStyle}>Dismiss</button></div>}
         {shareMessage && <div style={{ ...cardStyle, borderColor: '#245f45' }}>{shareMessage}</div>}
-        {tab === 'home' && <>{selected && <div style={cardStyle}><div style={{ opacity: .65 }}>{selected.symbol} · CoinMarketCap</div><div style={{ fontSize: 32, fontWeight: 800 }}>{money.format(selected.price)}</div><div style={{ color: selected.change24h >= 0 ? '#45d483' : '#ff6678' }}>{selected.change24h >= 0 ? '+' : ''}{selected.change24h.toFixed(2)}% · 24h</div><div style={{ opacity: .55, fontSize: 11, marginTop: 8 }}>Updated {updatedAt ? new Date(updatedAt).toLocaleTimeString() : '—'}{freshness !== null ? ` · ${freshness}s ago` : ''}</div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}><button onClick={() => void toggleWatch(selected.symbol)} style={smallButtonStyle} disabled={busy}>{isWatched ? '★ In Watchlist' : '☆ Add Watchlist'}</button><button onClick={() => void shareSelected()} style={smallButtonStyle} disabled={busy}>📤 Share Snapshot</button></div></div>}<h3>Live Market Scanner</h3>{loading && !markets.length && <div style={cardStyle}>Loading live market data…</div>}{markets.map((m) => <button key={m.symbol} onClick={() => { setSelectedSymbol(m.symbol); setTab('trade'); void track('market_view', { symbol: m.symbol }); }} style={{ ...cardStyle, width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left', color: 'inherit', cursor: 'pointer' }}><div><strong>{m.symbol}</strong><div style={{ opacity: .6, fontSize: 12 }}>24h volume {m.volume24h == null ? '—' : `$${compact.format(m.volume24h)}`}</div></div><div style={{ textAlign: 'right' }}><div>{money.format(m.price)}</div><div style={{ color: m.change24h >= 0 ? '#45d483' : '#ff6678' }}>{m.change24h >= 0 ? '+' : ''}{m.change24h.toFixed(2)}%</div></div></button>)}</>}
+        {tab === 'home' && <>{selected && <div style={cardStyle}><div style={{ opacity: .65 }}>{selected.symbol} · CoinMarketCap</div><div style={{ fontSize: 32, fontWeight: 800 }}>{money.format(selected.price)}</div><div style={{ color: selected.change24h >= 0 ? '#45d483' : '#ff6678' }}>{selected.change24h >= 0 ? '+' : ''}{selected.change24h.toFixed(2)}% · 24h</div><div style={{ opacity: .55, fontSize: 11, marginTop: 8 }}>Updated {updatedAt ? new Date(updatedAt).toLocaleTimeString() : '—'}{freshness !== null ? ` · ${freshness}s ago` : ''}</div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}><button onClick={() => void toggleWatch(selected.symbol)} style={smallButtonStyle} disabled={busy}>{isWatched ? '★ In Watchlist' : '☆ Add Watchlist'}</button><button onClick={() => void shareSelected()} style={smallButtonStyle} disabled={busy}>📤 Share Snapshot</button></div></div>}<h3>Live Market Scanner</h3>{loading && !markets.length && <div style={cardStyle}>Loading live market data…</div>}{marketError && <div style={{ ...cardStyle, borderColor: '#6d2330', background: '#0b111d' }}><strong style={{ fontSize: 13 }}>Market data unavailable</strong><div style={{ opacity: .65, fontSize: 12, marginTop: 4 }}>The rest of CryptoPulse remains fully available. You can retry from this Markets view.</div><button onClick={() => void loadMarkets()} style={{ ...smallButtonStyle, marginTop: 10 }} disabled={loading}>{loading ? 'Retrying…' : 'Retry market data'}</button></div>}{markets.map((m) => <button key={m.symbol} onClick={() => { setSelectedSymbol(m.symbol); setTab('trade'); void track('market_view', { symbol: m.symbol }); }} style={{ ...cardStyle, width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left', color: 'inherit', cursor: 'pointer' }}><div><strong>{m.symbol}</strong><div style={{ opacity: .6, fontSize: 12 }}>24h volume {m.volume24h == null ? '—' : `$${compact.format(m.volume24h)}`}</div></div><div style={{ textAlign: 'right' }}><div>{money.format(m.price)}</div><div style={{ color: m.change24h >= 0 ? '#45d483' : '#ff6678' }}>{m.change24h >= 0 ? '+' : ''}{m.change24h.toFixed(2)}%</div></div></button>)}</>}
         {tab === 'trade' && <div style={cardStyle}><h2>{side} {selected?.symbol ?? selectedSymbol}</h2><p style={{ opacity: .65 }}>Market intelligence view. Exchange execution is not enabled in this Mini App.</p>{selected && <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: '#0b111d' }}><div style={{ fontSize: 24, fontWeight: 800 }}>{money.format(selected.price)}</div><div style={{ opacity: .7 }}>{selected.change24h >= 0 ? 'Positive' : selected.change24h < 0 ? 'Negative' : 'Flat'} 24h movement</div></div>}<label>Amount (USD)</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, margin: '10px 0 16px' }}>{['10','25','50','100'].map(v => <button key={v} onClick={() => setAmount(v)} style={smallButtonStyle}>${v}</button>)}</div><input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" style={inputStyle} /><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}><button onClick={() => setSide('BUY')} style={{ ...buttonStyle, background: side === 'BUY' ? '#145c39' : '#242b39' }}>BUY</button><button onClick={() => setSide('SELL')} style={{ ...buttonStyle, background: side === 'SELL' ? '#6d2330' : '#242b39' }}>SELL</button></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}><button onClick={() => void toggleWatch(selected?.symbol ?? selectedSymbol)} style={smallButtonStyle}>{isWatched ? '★ Watchlist' : '☆ Watchlist'}</button><button onClick={() => void shareSelected()} style={smallButtonStyle}>📤 Share</button></div></div>}
         {tab === 'intelligence' && <div style={cardStyle}><h2>📊 Asset Intelligence</h2><p style={{ opacity: .65 }}>Factual market snapshots from the latest CoinMarketCap quote response.</p>{markets.map((m) => <div key={m.symbol} style={{ padding: '12px 0', borderBottom: '1px solid #1e2a3c' }}><div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{m.symbol}</strong><span>{money.format(m.price)}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', opacity: .7, fontSize: 12, marginTop: 4 }}><span>{m.change24h >= 0 ? 'Positive' : m.change24h < 0 ? 'Negative' : 'Flat'} 24h movement</span><span>{m.change24h >= 0 ? '+' : ''}{m.change24h.toFixed(2)}%</span></div><div style={{ opacity: .55, fontSize: 11, marginTop: 3 }}>24h volume {m.volume24h == null ? '—' : `$${compact.format(m.volume24h)}`}</div></div>)}</div>}
         {tab === 'watchlist' && <div style={cardStyle}><h2>⭐ Watchlist</h2><p style={{ opacity: .65 }}>Your Telegram-scoped assets are stored server-side.</p>{watchlist.length ? watchlist.map((item) => { const market = markets.find(m => m.symbol === item.symbol); return <button key={item.id} onClick={() => { setSelectedSymbol(item.symbol); setTab('trade'); }} style={{ ...cardStyle, width: '100%', display: 'flex', justifyContent: 'space-between', color: 'inherit', textAlign: 'left' }}><span><strong>{item.symbol}</strong>{market && <span style={{ opacity: .65, marginLeft: 8 }}>{money.format(market.price)}</span>}</span><span>{market ? `${market.change24h >= 0 ? '+' : ''}${market.change24h.toFixed(2)}%` : '—'}</span></button> }) : <div style={{ opacity: .6 }}>No assets saved yet. Add one from a market card.</div>}</div>}
