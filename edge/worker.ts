@@ -644,7 +644,7 @@ export default {
       }
     } catch (error) {
       console.error('CryptoPulse Edge boundary failure:', error);
-      try { await autonomousRecovery(env, url?.origin ?? new URL(request.url).origin, error instanceof Error ? error.message : String(error), new URL(request.url).pathname); } catch (recoveryError) { console.error('Autonomous recovery failed:', recoveryError); }
+      try { const failedUrl = new URL(request.url); await autonomousRecovery(env, failedUrl.origin, error instanceof Error ? error.message : String(error), failedUrl.pathname); } catch (recoveryError) { console.error('Autonomous recovery failed:', recoveryError); }
       return new Response('Internal Server Error', { status: 500 });
     }
   },
