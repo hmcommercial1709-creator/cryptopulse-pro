@@ -126,6 +126,15 @@ function getVersionedMiniAppUrl(baseUrl: string): string {
   return url.toString();
 }
 
+function corsHeaders(origin?: string): HeadersInit {
+  const allowed = origin === 'https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev' ? origin : 'https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev';
+  return { 'Access-Control-Allow-Origin': allowed, 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,X-Telegram-Init-Data', 'Access-Control-Max-Age': '86400', Vary: 'Origin' };
+}
+
+function corsJson(body: unknown, status: number, origin?: string): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders(origin), 'Content-Type': 'application/json; charset=utf-8' } });
+}
+
 function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 'referral' | 'pro'): string {
   const url = new URL(getVersionedMiniAppUrl(baseUrl));
   url.hash = section;
@@ -814,16 +823,21 @@ export default {
     try {
       const url = new URL(request.url);
 
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: corsHeaders(request.headers.get('Origin') ?? undefined) });
+      }
+
       if (url.pathname === '/invoice' && request.method === 'POST') {
+        const origin = request.headers.get('Origin') ?? undefined;
         const initData = request.headers.get('x-telegram-init-data') ?? '';
         const telegramUser = await verifyTelegramInitData(initData, env.BOT_TOKEN);
-        if (!telegramUser) return Response.json({ ok: false, error: 'Invalid Telegram Mini App authorization.' }, { status: 401 });
+        if (!telegramUser) return corsJson({ ok: false, error: 'Invalid Telegram Mini App authorization.' }, 401, origin);
         let body: { plan?: unknown } = {};
-        try { body = await request.json() as { plan?: unknown }; } catch { return Response.json({ ok: false, error: 'Invalid request body.' }, { status: 400 }); }
+        try { body = await request.json() as { plan?: unknown }; } catch { return corsJson({ ok: false, error: 'Invalid request body.' }, 400, origin); }
         const planCode = typeof body.plan === 'string' ? body.plan.trim() : '';
         const plans = await getSubscriptionPlans(env);
         const plan = plans.find(item => item.code === planCode);
-        if (!plan) return Response.json({ ok: false, error: 'Plan unavailable.' }, { status: 404 });
+        if (!plan) return corsJson({ ok: false, error: 'Plan unavailable.' }, 404, origin);
         const bot = await getBot(env);
         const options: Record<string, unknown> = { provider_token: '' };
         if (plan.recurring) options.subscription_period = 2592000;
@@ -835,7 +849,7 @@ export default {
           [{ label: plan.name, amount: plan.price_stars }],
           options as any,
         );
-        return Response.json({ ok: true, plan: plan.code, invoiceUrl: invoice });
+        return corsJson({ ok: true, plan: plan.code, invoiceUrl: invoice }, 200, origin);
       }
 
       if (url.pathname === '/health' || url.pathname === '/healthz') {
