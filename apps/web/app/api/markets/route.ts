@@ -107,7 +107,8 @@ async function fetchCoinGecko(): Promise<Map<string, Market>> {
   const ids = ASSETS.map(asset => asset.geckoId).join(',');
   const body = await fetchJson<GeckoBody>(
     `${CG_URL}?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true`,
-  , 'coingecko');
+    'coingecko',
+  );
 
   const result = new Map<string, Market>();
   for (const asset of ASSETS) {
