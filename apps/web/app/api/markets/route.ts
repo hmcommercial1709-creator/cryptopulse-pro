@@ -67,17 +67,37 @@ function validMarket(symbol: string, price: unknown, change24h: unknown, volume2
   };
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
+async function fetchJson<T>(url: string, provider: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       cache: 'no-store',
       signal: controller.signal,
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        // CoinGecko can reject generic Worker traffic; identify this server request explicitly.
+        'User-Agent': 'CryptoPulse-Pro/1.0 (+https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev)',
+      },
     });
-    if (!response.ok) throw new Error(`Provider HTTP ${response.status}`);
-    return await response.json() as T;
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') ?? 'unknown';
+      throw new Error(`${provider} HTTP ${response.status} (${contentType})`);
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+      throw new Error(`${provider} returned non-JSON content-type: ${contentType || 'missing'}`);
+    }
+
+    try {
+      return await response.json() as T;
+    } catch (error) {
+      throw new Error(
+        `${provider} JSON parse failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -87,7 +107,7 @@ async function fetchCoinGecko(): Promise<Map<string, Market>> {
   const ids = ASSETS.map(asset => asset.geckoId).join(',');
   const body = await fetchJson<GeckoBody>(
     `${CG_URL}?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true`,
-  );
+  , 'coingecko');
 
   const result = new Map<string, Market>();
   for (const asset of ASSETS) {
@@ -103,6 +123,7 @@ async function fetchCoinCap(): Promise<Map<string, Market>> {
   const ids = ASSETS.map(asset => asset.coinCapId).join(',');
   const body = await fetchJson<CoinCapBody>(
     `${COINCAP_URL}?ids=${encodeURIComponent(ids)}`,
+    'coincap',
   );
 
   const rows = body.data ?? [];
@@ -123,7 +144,7 @@ async function fetchCoinCap(): Promise<Map<string, Market>> {
 
 async function fetchBinance(): Promise<Map<string, Market>> {
   const symbols = encodeURIComponent(JSON.stringify(ASSETS.map(asset => asset.binanceSymbol)));
-  const body = await fetchJson<BinanceBody>(`${BINANCE_URL}?symbols=${symbols}`);
+  const body = await fetchJson<BinanceBody>(`${BINANCE_URL}?symbols=${symbols}`, 'binance');
   const rows = Array.isArray(body) ? body : [body];
 
   const result = new Map<string, Market>();
@@ -262,19 +283,25 @@ export async function GET() {
       },
     );
   } catch (error) {
-    console.error(
-      'Resilient market API failed:',
-      error instanceof Error ? error.message : String(error),
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Resilient market API failed; returning empty fallback:', message);
 
-    // Never expose a provider error or API-key requirement to the Mini App.
+    // Keep the Mini App interactive even when every upstream provider is unavailable.
+    // Returning 200 + an empty array lets the UI render its unavailable-state normally
+    // instead of turning a market-data outage into an API exception/503.
     return NextResponse.json(
-      { error: 'Public market providers are temporarily unavailable. Please retry shortly.' },
       {
-        status: 503,
+        source: 'fallback-empty',
+        mode: 'fallback',
+        updatedAt: new Date().toISOString(),
+        markets: [],
+      },
+      {
+        status: 200,
         headers: {
           'Cache-Control': 'no-store',
-          'X-Market-Resilience': 'all-public-providers-failed',
+          'X-Market-Resilience': 'empty-fallback',
+          'X-Market-Source': 'fallback-empty',
         },
       },
     );
