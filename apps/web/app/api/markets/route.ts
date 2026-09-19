@@ -105,21 +105,15 @@ async function providerBinance(): Promise<Market[]> {
 }
 
 async function providerCoinbase(): Promise<Market[]> {
+  // Coinbase spot is used as a resilient last-resort price source. It does not
+  // expose the same 24h fields as the richer providers, so those fields remain
+  // null rather than being fabricated as zero.
   const rows = await Promise.all(ASSETS.map(async a => {
-    const [spot, stats] = await Promise.all([
-      json<{ data?: { amount?: string } }>(
-        'https://api.coinbase.com/v2/prices/' + a.coinbase + '/spot',
-        'coinbase-spot',
-      ),
-      json<{ data?: { open?: string; volume?: string; last?: string } }>(
-        'https://api.coinbase.com/v2/prices/' + a.coinbase + '/stats',
-        'coinbase-stats',
-      ),
-    ]);
-    const price = Number(spot.data?.amount ?? stats.data?.last);
-    const open = Number(stats.data?.open);
-    const change = Number.isFinite(price) && Number.isFinite(open) && open > 0 ? ((price - open) / open) * 100 : null;
-    return market(a.symbol, price, change, stats.data?.volume);
+    const body = await json<{ data?: { amount?: string } }>(
+      'https://api.coinbase.com/v2/prices/' + a.coinbase + '/spot',
+      'coinbase',
+    );
+    return market(a.symbol, body.data?.amount, null, null);
   }));
   return rows.filter(Boolean) as Market[];
 }
