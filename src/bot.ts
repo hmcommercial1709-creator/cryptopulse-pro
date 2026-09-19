@@ -177,6 +177,17 @@ function requireThreeSnapshots(snapshots: Awaited<ReturnType<typeof getMarketSna
 export function createBot(): Bot {
   const bot = new Bot(requireBotToken());
 
+  const configuredMiniAppUrl = config.miniAppUrl?.trim();
+  if (configuredMiniAppUrl) {
+    void bot.api.setChatMenuButton({
+      menu_button: {
+        type: 'web_app',
+        text: 'Open CryptoPulse',
+        web_app: { url: configuredMiniAppUrl },
+      },
+    }).catch((error) => console.warn('Mini App menu button setup failed:', error));
+  }
+
   // Omni-Core middleware: acknowledge callbacks immediately, deduplicate rapid taps,
   // and contain unexpected handler failures so one update can never crash the process.
   bot.use(async (ctx, next) => {
