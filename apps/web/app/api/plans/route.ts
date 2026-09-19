@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { requireTelegramUser } from '../../../lib/mini-auth';
 import { supabaseSelect } from '../../../lib/supabase-admin';
 
 const FALLBACK_PLANS = [
@@ -17,5 +18,36 @@ export async function GET(_request: NextRequest) {
     return Response.json({ plans, source: 'supabase' });
   } catch {
     return Response.json({ plans: FALLBACK_PLANS, source: 'fallback' });
+  }
+}
+
+
+export async function POST(request: NextRequest): Promise<Response> {
+  try {
+    const user = requireTelegramUser(request);
+    const body = await request.json() as { plan?: unknown };
+    const code = typeof body.plan === 'string' ? body.plan.trim() : '';
+    const plan = FALLBACK_PLANS.find(item => item.code === code);
+    if (!plan) return Response.json({ ok: false, error: 'Plan unavailable.' }, { status: 404 });
+    const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+    if (!token) throw new Error('Telegram payment service is not configured.');
+    const telegram = await fetch(`https://api.telegram.org/bot${token}/createInvoiceLink`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: plan.name,
+        description: plan.description,
+        payload: `plan:${plan.code}:user:${user.id}`,
+        currency: 'XTR',
+        prices: [{ label: plan.name, amount: plan.price_stars }],
+        ...(plan.recurring ? { subscription_period: 2592000 } : {}),
+      }),
+      cache: 'no-store',
+    });
+    const result = await telegram.json() as { ok?: boolean; result?: string; description?: string };
+    if (!telegram.ok || !result.ok || !result.result) throw new Error(result.description ?? 'Telegram could not create the invoice.');
+    return Response.json({ ok: true, plan: plan.code, invoiceUrl: result.result }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    return Response.json({ ok: false, error: error instanceof Error ? error.message : 'Unable to open Telegram checkout.' }, { status: 400 });
   }
 }
