@@ -52,6 +52,7 @@ export default function MiniTradingTerminal() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [agentInstruction, setAgentInstruction] = useState('');
   const [agentTaskMessage, setAgentTaskMessage] = useState('');
+  const [referralUrl, setReferralUrl] = useState('');
   const visiblePlans = plans.length ? plans : FALLBACK_PLANS;
 
   const applyHashRoute = useCallback((hash: string) => {
@@ -209,6 +210,25 @@ export default function MiniTradingTerminal() {
     setBusy(true); try { const response = await fetch(`/api/alerts?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() }); if (!response.ok) throw new Error('Alert removal failed.'); await loadUserData(); void track('alert_remove', { id }); } catch (err) { setError(err instanceof Error ? err.message : 'Alert removal failed.'); } finally { setBusy(false); }
   };
 
+  const openReferralLink = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/referral', { headers: authHeaders(), cache: 'no-store' });
+      const body = await response.json() as { url?: string; error?: string };
+      if (!response.ok || !body.url) throw new Error(body.error ?? 'Referral link unavailable.');
+      setReferralUrl(body.url);
+      const tg = getTelegramWebApp();
+      if (tg?.openTelegramLink) tg.openTelegramLink(body.url);
+      else window.open(body.url, '_blank', 'noopener,noreferrer');
+      void track('referral_open');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Referral link unavailable.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const shareSelected = async () => {
     if (!selected) return; setBusy(true);
     try {
@@ -242,7 +262,7 @@ export default function MiniTradingTerminal() {
         {tab === 'alerts' && <div style={cardStyle}><h2>🔔 Price Alerts</h2><div style={{ display: 'grid', gap: 8 }}><select value={alertSymbol} onChange={e => setAlertSymbol(e.target.value)} style={inputStyle}>{markets.map(m => <option key={m.symbol}>{m.symbol}</option>)}</select><select value={alertCondition} onChange={e => setAlertCondition(e.target.value as typeof alertCondition)} style={inputStyle}><option value="above">Price above</option><option value="below">Price below</option><option value="change24h">24h change reaches</option></select><input value={alertThreshold} onChange={e => setAlertThreshold(e.target.value)} inputMode="decimal" placeholder={alertCondition === 'change24h' ? 'e.g. 5 or -5' : 'Target price'} style={inputStyle} /><Button onClick={() => void createAlert()} style={buttonStyle} disabled={busy}>Create Alert</Button></div><div style={{ marginTop: 18 }}>{alerts.map(a => <div key={a.id} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', gap: 8 }}><div><strong>{a.symbol}</strong><div style={{ opacity: .65 }}>{a.condition === 'above' ? 'Above' : a.condition === 'below' ? 'Below' : '24h change'} · {a.threshold}</div></div><Button onClick={() => void removeAlert(a.id)} style={smallButtonStyle} disabled={busy}>Remove</Button></div>)}</div></div>}
         {tab === 'auto' && <div style={cardStyle}><h2>🤖 Personal AI Agent</h2><p style={{ opacity: .7 }}>Tell CryptoPulse what you want monitored or prepared. Financial execution always requires explicit user authorization and an approved trading connection.</p><textarea value={agentInstruction} onChange={e => setAgentInstruction(e.target.value)} placeholder="Example: Monitor gold 24/7. If it falls 2%, alert me and prepare a $50 buy." style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }} /><Button onClick={() => void createAgentTask()} style={{ ...buttonStyle, marginTop: 10, width: '100%' }} disabled={busy || !agentInstruction.trim()}>{busy ? 'Creating…' : '🤖 Create Monitoring Task'}</Button>{agentTaskMessage && <div style={{ marginTop: 10, opacity: .8 }}>{agentTaskMessage}</div>}<div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .8 }}>Execution status: <strong>Authorized connections only</strong></div></div>}
         {tab === 'portfolio' && <div style={cardStyle}><h2>💼 Portfolio</h2><p style={{ opacity: .65 }}>No exchange account is connected to this Mini App. Portfolio balances and positions will appear here after secure server-side account integration is implemented.</p></div>}
-        {tab === 'referral' && <div style={cardStyle}><h2>👥 Referral Center</h2><p style={{ opacity: .7 }}>Invite new users through Telegram and track real server-side referral activity.</p><Button onClick={() => { goToSection('referral'); void track('referral_open'); }} style={buttonStyle}>Open Referral Center</Button><div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Referral attribution uses Telegram <code>startapp=ref_…</code> links and is recorded when the invited user opens the Mini App.</div></div>}
+        {tab === 'referral' && <div style={cardStyle}><h2>👥 Referral Center</h2><p style={{ opacity: .7 }}>Invite new users through Telegram and track real server-side referral activity.</p><Button onClick={() => void openReferralLink()} style={buttonStyle} disabled={busy}>{busy ? 'Opening…' : '🔗 Get My Referral Link'}</Button>{referralUrl && <div style={{ marginTop: 10, fontSize: 12, opacity: .75, wordBreak: 'break-all' }}>Your referral link is ready: {referralUrl}</div>}<div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .65, fontSize: 12 }}>Referral attribution uses Telegram <code>startapp=ref_…</code> links and is recorded when the invited user opens the Mini App.</div></div>}
         {tab === 'pro' && (
           <div id="pro" style={cardStyle}>
             <h2>👑 CryptoPulse VIP — Personal Trading Agent</h2>
