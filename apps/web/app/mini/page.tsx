@@ -11,7 +11,7 @@ type HashSection = 'markets' | 'signals' | 'referral' | 'pro';
 type Plan = { code: string; name: string; description: string; price_stars: number; billing_period: 'monthly' | 'annual'; recurring: boolean; features: string[] };
 
 
-type TelegramRuntime = { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void; ready?: () => void; expand?: () => void } };
+type TelegramRuntime = { WebApp?: { initData?: string; openTelegramLink?: (url: string) => void; sendData?: (data: string) => void; ready?: () => void; expand?: () => void } };
 const getTelegramWebApp = (): TelegramRuntime['WebApp'] => (window as unknown as { Telegram?: TelegramRuntime }).Telegram?.WebApp;
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
@@ -237,7 +237,7 @@ export default function MiniTradingTerminal() {
             ]).map(plan => <div key={plan.code} style={{ ...cardStyle, marginBottom: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><div><strong>{plan.name}</strong><div style={{ opacity: .65, fontSize: 12, marginTop: 4 }}>{plan.description}</div></div><strong>⭐{plan.price_stars}</strong></div>
               <div style={{ opacity: .7, fontSize: 12, marginTop: 8 }}>{plan.features.join(' · ')}</div>
-              <button onClick={() => { window.location.href = 'https://t.me/'; void track('plan_select', { plan: plan.code }); }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }}>⭐ Choose {plan.name}</button>
+              <button onClick={() => { const tg = getTelegramWebApp(); if (tg?.sendData) tg.sendData(JSON.stringify({ type: 'buy_plan', plan: plan.code })); else setAgentTaskMessage('Open the bot and use /plans to purchase this plan.'); void track('plan_select', { plan: plan.code }); }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }}>⭐ Choose {plan.name}</button>
             </div>)}
           </div>
           <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: '#0b111d', opacity: .7, fontSize: 12 }}>Payments are handled server-side through Telegram Stars. The bot invoice flow is the checkout path.</div>
