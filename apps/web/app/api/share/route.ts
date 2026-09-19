@@ -16,10 +16,9 @@ export async function POST(request: NextRequest) {
     if (typeof userId !== 'string') throw new Error('Unable to resolve CryptoPulse user.');
     const rows = await supabaseInsert('cp_share_cards', { user_id: userId, symbol, card_type: cardType, payload });
     const id = rows[0]?.id;
-    const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? '';
-    if (typeof id !== 'string' || !botUsername) throw new Error('Telegram share configuration is incomplete.');
+    if (typeof id !== 'string') throw new Error('Unable to create share card.');
     const target = typeof body.target === 'string' && /^[a-z0-9_-]{1,40}$/i.test(body.target) ? body.target : `asset_${symbol.toLowerCase()}`;
-    const startUrl = `https://t.me/${botUsername}?startapp=${encodeURIComponent(`share_${id}_${target}`)}`;
+    const startUrl = `https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev/mini?v=2026-09-19-05#${encodeURIComponent(target)}`;
     const rawText = payload.text;
     const text = typeof rawText === 'string' ? rawText.slice(0, 700) : `CryptoPulse ${symbol} market snapshot`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(startUrl)}&text=${encodeURIComponent(text)}`;
