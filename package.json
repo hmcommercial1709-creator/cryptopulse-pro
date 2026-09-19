@@ -20,7 +20,7 @@
     "edge:types": "npx wrangler types --config wrangler.toml",
     "mini:install": "npm --prefix apps/web install --no-audit --no-fund",
     "mini:build": "npm run mini:install && npm --prefix apps/web run build:edge",
-    "mini:deploy": "npm run mini:build && npx wrangler deploy --config apps/web/wrangler.toml"
+    "mini:deploy": "npm --prefix apps/web run deploy:edge"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
