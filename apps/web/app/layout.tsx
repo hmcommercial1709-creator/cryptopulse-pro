@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 
 export const metadata: Metadata = {
   title: { default: 'CryptoPulse Pro — Crypto Market Intelligence & Risk Tools', template: '%s | CryptoPulse Pro' },
@@ -9,5 +10,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}<Script src="https://telegram.org/js/telegram-web-app.js?63" strategy="beforeInteractive" /></body></html>;
 }
