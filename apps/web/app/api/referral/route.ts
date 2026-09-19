@@ -4,8 +4,15 @@ import { requireTelegramUser } from '../../../lib/mini-auth';
 export async function GET(request: NextRequest): Promise<Response> {
   try {
     const user = requireTelegramUser(request);
-    const username = process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, '');
-    if (!username) throw new Error('TELEGRAM_BOT_USERNAME is not configured.');
+    let username = process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, '').trim();
+    if (!username) {
+      const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN ?? '').trim();
+      if (!botToken) throw new Error('Telegram bot token is not configured.');
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, { cache: 'no-store' });
+      const body = await response.json() as { ok?: boolean; result?: { username?: string } };
+      username = body.ok ? body.result?.username?.trim() : undefined;
+    }
+    if (!username) throw new Error('Telegram bot username is not configured.');
 
     const startParam = `ref_${user.id}`;
     const url = `https://t.me/${username}?start=${startParam}`;
