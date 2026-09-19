@@ -385,6 +385,77 @@ async function processReferral(
   }
 }
 
+type AgentMarket = { symbol: string; price: number; change24h: number };
+const AGENT_SYMBOLS: Record<string,string> = { BTC:'BTC', ETH:'ETH', SOL:'SOL', GOLD:'GOLD', XAU:'GOLD' };
+
+async function getAgentMarkets(env: Env): Promise<AgentMarket[]> {
+  const app = getVersionedMiniAppUrl(getMiniAppBaseUrl(env)).replace(/\/mini\?[^#]+$/, '/api/markets');
+  const rows: AgentMarket[] = [];
+  try {
+    const r = await fetch(app, { headers: { Accept: 'application/json' } });
+    if (r.ok) {
+      const body = await r.json() as { markets?: Array<{symbol?:string;price?:number;change24h?:number}> };
+      for (const m of body.markets ?? []) if (m.symbol && Number.isFinite(m.price)) rows.push({ symbol:m.symbol.toUpperCase(), price:Number(m.price), change24h:Number(m.change24h ?? 0) });
+    }
+  } catch (error) { console.error('Agent market fetch failed:', error); }
+  try {
+    const period1 = Math.floor(Date.now()/1000)-172800;
+    const yahoo = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/GC=F?period1=${period1}&period2=${Math.floor(Date.now()/1000)}&interval=1d`, { headers:{Accept:'application/json'} });
+    if (yahoo.ok) {
+      const body = await yahoo.json() as { chart?: { result?: Array<{meta?:{regularMarketPrice?:number;previousClose?:number}}>}};
+      const meta = body.chart?.result?.[0]?.meta;
+      if (Number.isFinite(meta?.regularMarketPrice)) {
+        const price=Number(meta!.regularMarketPrice), prev=Number(meta?.previousClose ?? price);
+        rows.push({symbol:'GOLD',price,change24h:prev ? ((price-prev)/prev)*100 : 0});
+      }
+    }
+  } catch (error) { console.error('Gold market fetch failed:', error); }
+  return rows;
+}
+
+async function executeAgentTasks(env: Env): Promise<void> {
+  const { base, headers } = getSupabase(env);
+  const response = await fetch(`${base}cp_agent_tasks?status=eq.active&select=id,user_id,plan_code,instruction,requires_confirmation,execution_policy,next_run_at&limit=100`, { headers });
+  if (!response.ok) throw new Error(`Agent task lookup failed (${response.status}).`);
+  const tasks = await response.json() as Array<{id:string;user_id:string;plan_code:string;instruction:string;requires_confirmation:boolean;execution_policy:Record<string,unknown>;next_run_at:string|null}>;
+  if (!tasks.length) return;
+  const markets = await getAgentMarkets(env);
+  const bot = await getBot(env);
+  for (const task of tasks) {
+    try {
+      const policy = task.execution_policy ?? {};
+      const expiresAt = typeof policy.expires_at === 'string' ? Date.parse(policy.expires_at) : NaN;
+      if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+        await fetch(`${base}cp_agent_tasks?id=eq.${encodeURIComponent(task.id)}`, { method:'PATCH', headers:{...headers,Prefer:'return=minimal'}, body:JSON.stringify({status:'completed',updated_at:new Date().toISOString(),last_result:{reason:'trial_expired'}}) });
+        const users = await fetch(`${base}cp_users?id=eq.${encodeURIComponent(task.user_id)}&select=telegram_user_id&limit=1`, {headers});
+        const u = users.ok ? (await users.json() as Array<{telegram_user_id:number}>)[0] : undefined;
+        if (u?.telegram_user_id) await bot.api.sendMessage(u.telegram_user_id,'🔔 Your free AI task has ended after 24 hours.\n\n⭐ Pro gives you longer-running automation and more active tasks.\n👑 VIP unlocks the Personal Trading Agent, advanced automation, voice workflows and custom tasks.\n\nOpen CryptoPulse to upgrade.');
+        continue;
+      }
+      const text=task.instruction.toUpperCase();
+      const symbolKey=Object.keys(AGENT_SYMBOLS).find(k=>new RegExp(`\\b${k}\\b`).test(text));
+      const symbol=symbolKey ? AGENT_SYMBOLS[symbolKey] : '';
+      const market=markets.find(m=>m.symbol===symbol);
+      if (!market) continue;
+      const dropMatch=text.match(/(?:DROP|FALL|DOWN|DECREASE|ينخفض|ينزل|هبوط)[^0-9]{0,30}(\\d+(?:\\.\\d+)?)\\s*%/i);
+      const riseMatch=text.match(/(?:RISE|UP|INCREASE|ينصعد|يرتفع)[^0-9]{0,30}(\\d+(?:\\.\\d+)?)\\s*%/i);
+      const threshold=dropMatch ? Number(dropMatch[1]) : riseMatch ? Number(riseMatch[1]) : NaN;
+      const condition=dropMatch ? 'drop' : riseMatch ? 'rise' : '';
+      if (!condition || !Number.isFinite(threshold)) continue;
+      const triggered = condition==='drop' ? market.change24h <= -threshold : market.change24h >= threshold;
+      const already=policy.last_trigger_key === `${symbol}:${condition}:${threshold}`;
+      await fetch(`${base}cp_agent_tasks?id=eq.${encodeURIComponent(task.id)}`, { method:'PATCH', headers:{...headers,Prefer:'return=minimal'}, body:JSON.stringify({next_run_at:new Date(Date.now()+5*60000).toISOString(),updated_at:new Date().toISOString(),last_run_at:new Date().toISOString(),last_result:{symbol,price:market.price,change24h:market.change24h,triggered}}) });
+      if (triggered && !already) {
+        const users = await fetch(`${base}cp_users?id=eq.${encodeURIComponent(task.user_id)}&select=telegram_user_id&limit=1`, {headers});
+        const u = users.ok ? (await users.json() as Array<{telegram_user_id:number}>)[0] : undefined;
+        if (u?.telegram_user_id) await bot.api.sendMessage(u.telegram_user_id,`🔔 CryptoPulse Alert\\n\\n${symbol} is ${condition==='drop'?'down':'up'} ${Math.abs(market.change24h).toFixed(2)}% over the current 24h window.\\nPrice: ${market.price}\\n\\nThis alert does not execute a trade. Any real-money execution requires an authorized connection and explicit confirmation.`);
+        const nextPolicy={...policy,last_trigger_key:`${symbol}:${condition}:${threshold}`,last_triggered_at:new Date().toISOString()};
+        await fetch(`${base}cp_agent_tasks?id=eq.${encodeURIComponent(task.id)}`, { method:'PATCH', headers:{...headers,Prefer:'return=minimal'}, body:JSON.stringify({execution_policy:nextPolicy,updated_at:new Date().toISOString()}) });
+      }
+    } catch (error) { console.error('Agent task execution failed:', task.id, error); }
+  }
+}
+
 type SubscriptionPlan = {
   code: string;
   name: string;
@@ -801,6 +872,7 @@ export default {
     const origin = 'https://cryptopulse-pro-edge.hmcommercial1709.workers.dev';
     try {
       await selfHealTelegramConfiguration(env, origin);
+      await executeAgentTasks(env);
       const healthUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env)).replace(/\/mini\?[^#]+$/, '/api/health');
       const response = await fetch(healthUrl, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error('Mini App health HTTP ' + response.status);
