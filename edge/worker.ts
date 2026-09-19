@@ -117,7 +117,8 @@ function getVersionedMiniAppUrl(baseUrl: string): string {
   // The Telegram WebApp URL must be /mini?v=release, not ?v=release/mini.
   // Keep the application path before the query string so Telegram opens the
   // actual Next.js Mini App route instead of a malformed query URL.
-  url.pathname = url.pathname.replace(/\/$/, '') + '/mini';
+  const path = url.pathname.replace(/\/+$/, '');
+  url.pathname = path.endsWith('/mini') ? path : path + '/mini';
   url.searchParams.set('v', MINI_APP_RELEASE);
   return url.toString();
 }
@@ -429,12 +430,13 @@ async function getBot(env: Env): Promise<Bot> {
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
       const keyboard = new InlineKeyboard();
-      const miniAppUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env));
+      const miniAppBaseUrl = getMiniAppBaseUrl(env);
+      const miniAppUrl = getVersionedMiniAppUrl(miniAppBaseUrl);
 
       if (miniAppUrl) {
         keyboard
-          .webApp(copy.markets, getMiniAppSectionUrl(miniAppUrl, 'markets'))
-          .webApp(copy.signals, getMiniAppSectionUrl(miniAppUrl, 'signals'))
+          .webApp(copy.markets, getMiniAppSectionUrl(miniAppBaseUrl, 'markets'))
+          .webApp(copy.signals, getMiniAppSectionUrl(miniAppBaseUrl, 'signals'))
           .row()
           .webApp(copy.referral, getMiniAppSectionUrl(miniAppUrl, 'referral'))
           .webApp(copy.pro, getMiniAppSectionUrl(miniAppUrl, 'pro'))
