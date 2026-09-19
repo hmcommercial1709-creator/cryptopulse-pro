@@ -33,9 +33,8 @@ function getTelegramInitData(): string {
 }
 
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  // Telegram Desktop/WebView can render the React DOM correctly while its
-  // synthetic event delegation is unreliable in some embedded WebViews.
-  // Bind the action directly to the actual DOM button as a second, native path.
+  // Use the element's native onclick property instead of React's delegated
+  // event system. This is the most reliable path inside Telegram Desktop WebViews.
   const { onClick, ...rest } = props;
   const ref = useRef<HTMLButtonElement>(null);
   const handlerRef = useRef(onClick);
@@ -43,13 +42,12 @@ function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
 
   useEffect(() => {
     const node = ref.current;
-    if (!node || !handlerRef.current) return;
-    const handleNativeClick = (event: MouseEvent) => {
+    if (!node) return;
+    node.onclick = (event) => {
       if (node.disabled) return;
       handlerRef.current?.(event as unknown as React.MouseEvent<HTMLButtonElement>);
     };
-    node.addEventListener('click', handleNativeClick, { capture: true });
-    return () => node.removeEventListener('click', handleNativeClick, { capture: true });
+    return () => { node.onclick = null; };
   }, []);
 
   return <button ref={ref} type="button" {...rest} />;
@@ -88,6 +86,8 @@ export default function MiniTradingTerminal() {
   const [agentInstruction, setAgentInstruction] = useState('');
   const [agentTaskMessage, setAgentTaskMessage] = useState('');
   const [referralUrl, setReferralUrl] = useState('');
+  const [telegramAuthReady, setTelegramAuthReady] = useState(false);
+  const [telegramAuthChecked, setTelegramAuthChecked] = useState(false);
   const visiblePlans = plans.length ? plans : FALLBACK_PLANS;
 
   const applyHashRoute = useCallback((hash: string) => {
@@ -202,6 +202,23 @@ export default function MiniTradingTerminal() {
 
   useEffect(() => {
     try { getTelegramWebApp()?.ready?.(); getTelegramWebApp()?.expand?.(); } catch { /* Telegram runtime is optional outside Telegram */ }
+
+    // Telegram can finish wiring the WebView launch payload just after the
+    // document becomes interactive. Poll briefly so a valid signed initData
+    // cannot be missed by the first user action.
+    let attempts = 0;
+    const checkTelegramAuth = () => {
+      const present = Boolean(getTelegramInitData());
+      if (present) setTelegramAuthReady(true);
+      attempts += 1;
+      if (present || attempts >= 50) {
+        setTelegramAuthChecked(true);
+        return;
+      }
+      window.setTimeout(checkTelegramAuth, 100);
+    };
+    checkTelegramAuth();
+
     void loadUserData(); void loadPlans(); void track('mini_open');
     applyHashRoute(window.location.hash);
     const onHashChange = () => applyHashRoute(window.location.hash);
@@ -305,7 +322,11 @@ export default function MiniTradingTerminal() {
           <Button onClick={() => goToSection('pro')} style={{ ...quickNavButtonStyle, background: '#d97706' }}>⭐ Pro</Button>
         </section>
         {error && <div role="alert" style={{ ...cardStyle, borderColor: '#8b2f3c', background: '#160d12', marginBottom: 10 }}><strong>Action failed</strong><div style={{ opacity: .78, fontSize: 12, marginTop: 4 }}>{error}</div><Button onClick={() => setError('')} style={{ ...smallButtonStyle, marginTop: 8 }}>Dismiss</Button></div>}
-        {typeof window !== 'undefined' && !getTelegramInitData() && <div role="status" style={{ ...cardStyle, borderColor: '#6d5520', background: '#17130a', fontSize: 12, opacity: .9 }}>This app was opened without a signed Telegram session. Use the “Open CryptoPulse” bot menu button next to the message field to launch the authenticated Mini App. Keyboard WebApp buttons and a normal browser do not provide the signed initData required for personal actions.</div>}
+        {typeof window !== 'undefined' && telegramAuthChecked && !telegramAuthReady && !getTelegramInitData() && <div role="status" style={{ ...cardStyle, borderColor: '#6d5520', background: '#17130a', fontSize: 12, opacity: .9 }}>
+          <strong>Telegram session not detected.</strong>
+          <div style={{ marginTop: 5 }}>This launch did not provide signed Telegram initData, so personal actions cannot be authenticated. Re-open CryptoPulse from the bot's native Mini App entry (profile <b>Open App</b> or the chat menu button) rather than a normal browser URL.</div>
+          <Button onClick={() => { try { getTelegramWebApp()?.openTelegramLink?.('https://t.me/CryptoPulseHubBot?startapp=auth'); } catch { window.location.href = 'https://t.me/CryptoPulseHubBot?startapp=auth'; } }} style={{ ...smallButtonStyle, marginTop: 10 }}>🔐 Re-open authenticated Mini App</Button>
+        </div>}
         {shareMessage && <div style={{ ...cardStyle, borderColor: '#245f45' }}>{shareMessage}</div>}
         {tab === 'home' && <>{selected && <div style={cardStyle}><div style={{ opacity: .65 }}>{selected.symbol} · CoinMarketCap</div><div style={{ fontSize: 32, fontWeight: 800 }}>{money.format(selected.price)}</div><div style={{ color: changeTone(selected.change24h) }}>{changeText(selected.change24h)} · 24h</div><div style={{ opacity: .55, fontSize: 11, marginTop: 8 }}>Updated {updatedAt ? new Date(updatedAt).toLocaleTimeString() : '—'}{freshness !== null ? ` · ${freshness}s ago` : ''}</div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}><Button onClick={() => void toggleWatch(selected.symbol)} style={{ ...smallButtonStyle, touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', cursor: 'pointer' }} disabled={busy}>{isWatched ? '★ In Watchlist' : '☆ Add Watchlist'}</Button><Button onClick={() => void shareSelected()} style={smallButtonStyle} disabled={busy}>📤 Share Snapshot</Button></div></div>}<h3>Live Market Scanner</h3>{loading && !markets.length && <div style={cardStyle}>Loading live market data…</div>}{marketError && <div style={{ ...cardStyle, borderColor: '#6d2330', background: '#0b111d' }}><strong style={{ fontSize: 13 }}>Market data unavailable</strong><div style={{ opacity: .65, fontSize: 12, marginTop: 4 }}>The rest of CryptoPulse remains fully available. You can retry from this Markets view.</div><Button onClick={() => void loadMarkets()} style={{ ...smallButtonStyle, marginTop: 10 }} disabled={loading}>{loading ? 'Retrying…' : 'Retry market data'}</Button></div>}{markets.map((m) => <Button key={m.symbol} onClick={() => { setSelectedSymbol(m.symbol); navigateTab('trade', m.symbol); void track('market_view', { symbol: m.symbol }); }} style={{ ...cardStyle, width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left', color: 'inherit', cursor: 'pointer' }}><div><strong>{m.symbol}</strong><div style={{ opacity: .6, fontSize: 12 }}>24h volume {m.volume24h == null ? '—' : `$${compact.format(m.volume24h)}`}</div></div><div style={{ textAlign: 'right' }}><div>{money.format(m.price)}</div><div style={{ color: changeTone(m.change24h) }}>{changeText(m.change24h)}</div></div></Button>)}</>}
         {tab === 'trade' && <div style={cardStyle}><h2>{side} {selected?.symbol ?? selectedSymbol}</h2><p style={{ opacity: .65 }}>Market intelligence view. Exchange execution is not enabled in this Mini App.</p>{selected && <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: '#0b111d' }}><div style={{ fontSize: 24, fontWeight: 800 }}>{money.format(selected.price)}</div><div style={{ opacity: .7 }}>{selected.change24h == null ? 'Unavailable' : selected.change24h >= 0 ? 'Positive' : 'Negative'} 24h movement</div></div>}<label>Amount (USD)</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, margin: '10px 0 16px' }}>{['10','25','50','100'].map(v => <Button key={v} onClick={() => setAmount(v)} style={smallButtonStyle}>${v}</Button>)}</div><input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" style={inputStyle} /><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}><Button onClick={() => setSide('BUY')} style={{ ...buttonStyle, background: side === 'BUY' ? '#145c39' : '#242b39' }}>BUY</Button><Button onClick={() => setSide('SELL')} style={{ ...buttonStyle, background: side === 'SELL' ? '#6d2330' : '#242b39' }}>SELL</Button></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}><Button onClick={() => void toggleWatch(selected?.symbol ?? selectedSymbol)} style={smallButtonStyle}>{isWatched ? '★ Watchlist' : '☆ Watchlist'}</Button><Button onClick={() => void shareSelected()} style={smallButtonStyle}>📤 Share</Button></div></div>}
