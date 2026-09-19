@@ -658,6 +658,17 @@ async function getBot(env: Env): Promise<Bot> {
     const bot = new Bot(env.BOT_TOKEN);
     await bot.init();
 
+    const configuredMiniAppUrl = getVersionedMiniAppUrl(getMiniAppBaseUrl(env));
+    if (configuredMiniAppUrl) {
+      await bot.api.setChatMenuButton({
+        menu_button: {
+          type: 'web_app',
+          text: 'Open CryptoPulse',
+          web_app: { url: configuredMiniAppUrl },
+        },
+      }).catch((error) => console.warn('Mini App menu button setup failed:', error));
+    }
+
     bot.use(async (ctx, next) => {
       if (ctx.callbackQuery) {
         await ctx.answerCallbackQuery().catch(() => undefined);
