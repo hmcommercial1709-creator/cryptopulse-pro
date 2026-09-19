@@ -106,11 +106,20 @@ async function providerBinance(): Promise<Market[]> {
 
 async function providerCoinbase(): Promise<Market[]> {
   const rows = await Promise.all(ASSETS.map(async a => {
-    const body = await json<{ data?: { amount?: string } }>(
-      'https://api.coinbase.com/v2/prices/' + a.coinbase + '/spot',
-      'coinbase',
-    );
-    return market(a.symbol, body.data?.amount, null, null);
+    const [spot, stats] = await Promise.all([
+      json<{ data?: { amount?: string } }>(
+        'https://api.coinbase.com/v2/prices/' + a.coinbase + '/spot',
+        'coinbase-spot',
+      ),
+      json<{ data?: { open?: string; volume?: string; last?: string } }>(
+        'https://api.coinbase.com/v2/prices/' + a.coinbase + '/stats',
+        'coinbase-stats',
+      ),
+    ]);
+    const price = Number(spot.data?.amount ?? stats.data?.last);
+    const open = Number(stats.data?.open);
+    const change = Number.isFinite(price) && Number.isFinite(open) && open > 0 ? ((price - open) / open) * 100 : null;
+    return market(a.symbol, price, change, stats.data?.volume);
   }));
   return rows.filter(Boolean) as Market[];
 }
@@ -156,18 +165,27 @@ async function loadMarkets(apiKey: string): Promise<{ markets: Market[]; source:
     ['coinbase', providerCoinbase],
   ];
 
-  const merged = new Map<string, Market>(cached.markets.map(m => [m.symbol, m]));
+  // When cache is stale, provider data must win. The previous implementation
+  // seeded the merge with stale rows and only replaced rows with null change24h,
+  // which could keep zero-volume/zero-change data alive indefinitely.
+  const merged = new Map<string, Market>();
   const sources: string[] = [];
   for (const [name, fn] of providers) {
     try {
       const rows = await fn();
-      for (const row of rows) if (!merged.has(row.symbol) || merged.get(row.symbol)?.change24h == null) merged.set(row.symbol, row);
+      for (const row of rows) {
+        const existing = merged.get(row.symbol);
+        if (!existing || (existing.change24h == null && row.change24h != null)) merged.set(row.symbol, row);
+      }
       if (rows.length) sources.push(name);
       if (merged.size === ASSETS.length) break;
     } catch (error) {
       console.warn('Market provider failed:', name, error instanceof Error ? error.message : String(error));
     }
   }
+
+  // Fall back to stale cache only for symbols no live provider returned.
+  for (const row of cached.markets) if (!merged.has(row.symbol)) merged.set(row.symbol, row);
 
   const markets = ASSETS.map(a => merged.get(a.symbol)).filter(Boolean) as Market[];
   if (markets.length) {
