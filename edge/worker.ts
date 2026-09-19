@@ -271,6 +271,8 @@ type TelegramUpdate = {
     from?: TelegramUser;
     successful_payment?: Record<string, unknown>;
   };
+  web_app_data?: { data?: string };
+  pre_checkout_query?: { id?: string; from?: TelegramUser; currency?: string; total_amount?: number; invoice_payload?: string };
   callback_query?: {
     from?: TelegramUser;
     message?: { chat?: { id?: number } };
@@ -423,6 +425,67 @@ async function sendStarsInvoice(env: Env, ctx: any, plan: SubscriptionPlan): Pro
   );
 }
 
+async function processPreCheckout(env: Env, update: TelegramUpdate): Promise<void> {
+  const query = update.pre_checkout_query;
+  if (!query?.id) return;
+  const payload = String(query.invoice_payload ?? '');
+  const match = /^plan:(.+)$/.exec(payload);
+  if (!match || query.currency !== 'XTR') throw new Error('Invalid CryptoPulse Stars checkout.');
+  const plans = await getSubscriptionPlans(env);
+  const plan = plans.find((item) => item.code === match[1]);
+  if (!plan || Number(query.total_amount) !== plan.price_stars) throw new Error('Plan price mismatch.');
+  const bot = await getBot(env);
+  await bot.api.answerPreCheckoutQuery(query.id, true);
+}
+
+async function activateSubscriptionFromPayment(env: Env, payment: Record<string, unknown>, telegramUserId: number, userId: string): Promise<void> {
+  const payload = String(payment.invoice_payload ?? '');
+  const match = /^plan:(.+)$/.exec(payload);
+  if (!match) return;
+  const plans = await getSubscriptionPlans(env);
+  const plan = plans.find((item) => item.code === match[1]);
+  if (!plan) throw new Error('Paid plan no longer exists.');
+  const chargeId = String(payment.telegram_payment_charge_id ?? '');
+  const expires = new Date(Date.now() + (plan.billing_period === 'annual' ? 365 : 30) * 86400000).toISOString();
+  const { base, headers } = getSupabase(env);
+  const response = await fetch(`${base}cp_subscriptions?on_conflict=user_id`, {
+    method: 'POST',
+    headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      user_id: userId,
+      plan: plan.code.startsWith('vip') ? 'vip' : 'pro',
+      plan_code: plan.code,
+      status: 'active',
+      telegram_payment_charge_id: chargeId || null,
+      starts_at: new Date().toISOString(),
+      expires_at: expires,
+      price_stars: plan.price_stars,
+      currency: 'XTR',
+      is_recurring: plan.recurring,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  if (!response.ok) throw new Error(`Subscription activation failed (${response.status}).`);
+}
+
+async function processWebAppData(env: Env, update: TelegramUpdate): Promise<void> {
+  const raw = String(update.web_app_data?.data ?? '');
+  if (!raw) return;
+  let data: { type?: string; plan?: string };
+  try { data = JSON.parse(raw); } catch { return; }
+  if (data.type !== 'buy_plan' || typeof data.plan !== 'string') return;
+  const telegramUserId = update.message?.from?.id;
+  const chatId = update.message?.chat?.id;
+  if (!telegramUserId || !chatId) return;
+  const plans = await getSubscriptionPlans(env);
+  const plan = plans.find((item) => item.code === data.plan);
+  if (!plan) throw new Error('Requested plan is unavailable.');
+  const bot = await getBot(env);
+  const options: Record<string, unknown> = { provider_token: '', start_parameter: `plan_${plan.code}` };
+  if (plan.recurring) options.subscription_period = 2592000;
+  await bot.api.sendInvoice(chatId, plan.name, plan.description, `plan:${plan.code}`, 'XTR', [{ label: plan.name, amount: plan.price_stars }], options as any);
+}
+
 async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promise<void> {
   const payment = update.message?.successful_payment;
   const telegramUserId = update.message?.from?.id;
@@ -472,6 +535,8 @@ async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promi
       `Stars payment insert failed (${response.status}): ${(await response.text()).slice(0, 1200)}`,
     );
   }
+
+  await activateSubscriptionFromPayment(env, payment, telegramUserId, userId);
 }
 
 async function getBot(env: Env): Promise<Bot> {
@@ -565,6 +630,18 @@ async function getBot(env: Env): Promise<Bot> {
           ? { reply_markup: new InlineKeyboard().url(copy.miniApp, url) }
           : undefined,
       );
+    });
+
+    bot.on('pre_checkout_query', async (ctx) => {
+      try {
+        await processPreCheckout(env, ctx.update as TelegramUpdate);
+      } catch (error) {
+        await ctx.api.answerPreCheckoutQuery(ctx.preCheckoutQuery.id, false, error instanceof Error ? error.message : 'Checkout validation failed.').catch(() => undefined);
+      }
+    });
+
+    bot.on('message:web_app_data', async (ctx) => {
+      await processWebAppData(env, ctx.update as TelegramUpdate);
     });
 
     bot.on('message:successful_payment', async (ctx) => {
