@@ -494,7 +494,11 @@ async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promi
 
   const chargeId = String(payment.telegram_payment_charge_id ?? '');
   const invoicePayload = String(payment.invoice_payload ?? '');
-  if (!chargeId || !invoicePayload) throw new Error('Invalid Telegram Stars payment payload.');
+  const planMatch = /^plan:(.+)$/.exec(invoicePayload);
+  if (!chargeId || !invoicePayload || !planMatch) throw new Error('Invalid Telegram Stars payment payload.');
+  const paidPlans = await getSubscriptionPlans(env);
+  const paidPlan = paidPlans.find((item) => item.code === planMatch[1]);
+  if (!paidPlan) throw new Error('Paid plan is unavailable.');
 
   const { base, headers } = getSupabase(env);
   const usersResponse = await fetch(
@@ -519,7 +523,7 @@ async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promi
     body: JSON.stringify({
       user_id: userId,
       telegram_user_id: telegramUserId,
-      plan: 'pro',
+      plan: paidPlan.code.startsWith('vip') ? 'vip' : 'pro',
       amount_stars: Number(payment.total_amount ?? 0),
       currency: String(payment.currency ?? 'XTR'),
       invoice_payload: invoicePayload,
