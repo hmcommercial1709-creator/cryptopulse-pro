@@ -101,6 +101,14 @@ function t(locale: Locale) {
   return I18N[locale];
 }
 
+function getMiniAppBaseUrl(env: Env): string {
+  return String(env.MINI_APP_URL ?? '').trim().replace(/\/+$/, '');
+}
+
+function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 'referral' | 'pro'): string {
+  return `${baseUrl}#${section}`;
+}
+
 let cachedBotToken = '';
 let cachedBot: Bot | undefined;
 let cachedBotInitPromise: Promise<Bot> | undefined;
@@ -383,16 +391,18 @@ async function getBot(env: Env): Promise<Bot> {
 
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
-      const keyboard = new InlineKeyboard()
-        .text(copy.markets, 'markets')
-        .text(copy.signals, 'signals')
-        .row()
-        .text(copy.referral, 'referral')
-        .text(copy.pro, 'pro');
+      const keyboard = new InlineKeyboard();
+      const miniAppUrl = getMiniAppBaseUrl(env);
 
-      const miniAppUrl = String(env.MINI_APP_URL ?? '').trim().replace(/\/$/, '');
       if (miniAppUrl) {
-        keyboard.row().webApp(copy.miniApp, `${miniAppUrl}/mini`);
+        keyboard
+          .webApp(copy.markets, getMiniAppSectionUrl(miniAppUrl, 'markets'))
+          .webApp(copy.signals, getMiniAppSectionUrl(miniAppUrl, 'signals'))
+          .row()
+          .webApp(copy.referral, getMiniAppSectionUrl(miniAppUrl, 'referral'))
+          .webApp(copy.pro, getMiniAppSectionUrl(miniAppUrl, 'pro'))
+          .row()
+          .webApp(copy.miniApp, miniAppUrl);
       }
 
       await ctx.reply(
