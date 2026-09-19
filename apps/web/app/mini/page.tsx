@@ -327,9 +327,9 @@ export default function MiniTradingTerminal() {
                     setError('');
                     try {
                       const tg = getTelegramWebApp();
-                      const response = await fetch('https://cryptopulse-pro-edge.hmcommercial1709.workers.dev/invoice', {
+                      const response = await fetch('/api/plans', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': tg?.initData ?? '' },
+                        headers: authHeaders(),
                         body: JSON.stringify({ plan: plan.code }),
                       });
                       const body = await response.json() as { invoiceUrl?: string; error?: string };
