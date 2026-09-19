@@ -6,6 +6,9 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
+# Always enter the OpenNext Worker first so /mini and Next route handlers are never
+# shadowed by a static-asset fallback response.
+run_worker_first = true
 
 [observability]
 enabled = true
