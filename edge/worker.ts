@@ -108,7 +108,7 @@ const DEFAULT_MINI_APP_URL = 'https://cryptopulse-pro-mini-app.hmcommercial1709.
 // Cache-bust Telegram Mini App links whenever the deployed frontend changes.
 // Telegram can retain an older Web App document for an existing URL, so every
 // production frontend release gets an explicit version query string.
-const MINI_APP_RELEASE = '2026-09-19-06';
+const MINI_APP_RELEASE = '2026-09-19-11';
 
 function getMiniAppBaseUrl(env: Env): string {
   const configured = String(env.MINI_APP_URL ?? '').trim().replace(/\/+$/, '');
