@@ -15,19 +15,11 @@ type TelegramRuntime = { WebApp?: { initData?: string; openTelegramLink?: (url: 
 const getTelegramWebApp = (): TelegramRuntime['WebApp'] => (window as unknown as { Telegram?: TelegramRuntime }).Telegram?.WebApp;
 
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  const { onClick, onTouchStart, ...rest } = props;
-  const touchRef = useRef(0);
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (Date.now() < touchRef.current) return;
-    onClick?.(event);
-  };
-  const handleTouchStart = (event: React.TouchEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    touchRef.current = Date.now() + 700;
-    onTouchStart?.(event);
-    if (onClick) onClick(event as unknown as React.MouseEvent<HTMLButtonElement>);
-  };
-  return <button {...rest} onClick={handleClick} onTouchStart={handleTouchStart} />;
+  // Keep interaction on the browser/WebView's native click path. The previous
+  // touchstart+preventDefault shim could suppress the synthetic click in some
+  // Telegram WebView versions and also invoked mouse handlers with a TouchEvent.
+  // React's click event is already normalized for mouse, touch and keyboard input.
+  return <button type="button" {...props} />;
 }
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
