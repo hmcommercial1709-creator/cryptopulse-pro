@@ -168,7 +168,7 @@ export default function MiniTradingTerminal() {
       const response = await fetch('/api/share', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ symbol: selected.symbol, cardType: 'market', payload: { text, price: selected.price, change24h: selected.change24h } }) });
       if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? 'Share link failed.');
       const body = (await response.json()) as { shareUrl: string };
-      if (getTelegramWebApp()?.openTelegramLink) window.Telegram.WebApp.openTelegramLink(body.shareUrl); else window.open(body.shareUrl, '_blank', 'noopener,noreferrer');
+      if (getTelegramWebApp()?.openTelegramLink) getTelegramWebApp()?.openTelegramLink?.(body.shareUrl); else window.open(body.shareUrl, '_blank', 'noopener,noreferrer');
       setShareMessage('Share card ready.'); void track('first_share', { symbol: selected.symbol, cardType: 'market' });
     } catch (err) { setError(err instanceof Error ? err.message : 'Share link failed.'); }
     finally { setBusy(false); }
