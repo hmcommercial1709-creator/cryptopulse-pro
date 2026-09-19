@@ -101,8 +101,11 @@ function t(locale: Locale) {
   return I18N[locale];
 }
 
+const DEFAULT_MINI_APP_URL = 'https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev';
+
 function getMiniAppBaseUrl(env: Env): string {
-  return String(env.MINI_APP_URL ?? '').trim().replace(/\/+$/, '');
+  const configured = String(env.MINI_APP_URL ?? '').trim().replace(/\/+$/, '');
+  return configured || DEFAULT_MINI_APP_URL;
 }
 
 function getMiniAppSectionUrl(baseUrl: string, section: 'markets' | 'signals' | 'referral' | 'pro'): string {
