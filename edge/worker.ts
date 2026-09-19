@@ -509,10 +509,16 @@ export default {
         });
       }
 
+      // Public browser entrypoint: send Mini App traffic to the real Next.js/OpenNext frontend.
+      // POST remains reserved for the Telegram webhook.
+      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/mini')) {
+        return Response.redirect(`${getMiniAppBaseUrl(env)}/mini`, 302);
+      }
+
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', {
           status: 405,
-          headers: { Allow: 'POST' },
+          headers: { Allow: 'GET, POST' },
         });
       }
 
