@@ -31,9 +31,16 @@ function getTelegramInitData(): string {
     const raw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const params = new URLSearchParams(raw);
     const fromHash = params.get('tgWebAppData')?.trim();
-    if (fromHash) return fromHash;
+    if (fromHash) {
+      try { window.sessionStorage.setItem('cryptopulse:telegram-init-data', fromHash); } catch { /* storage may be unavailable */ }
+      return fromHash;
+    }
     const fromQuery = new URLSearchParams(window.location.search).get('tgWebAppData')?.trim();
-    return fromQuery ?? '';
+    if (fromQuery) {
+      try { window.sessionStorage.setItem('cryptopulse:telegram-init-data', fromQuery); } catch { /* storage may be unavailable */ }
+      return fromQuery;
+    }
+    return '';
   } catch {
     return '';
   }
