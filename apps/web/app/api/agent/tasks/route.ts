@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { jsonError, requireTelegramUser } from '../../../lib/mini-auth';
-import { supabaseInsert, supabaseSelect, supabaseUpsert } from '../../../lib/supabase-admin';
+import { jsonError, requireTelegramUser } from '../../../../lib/mini-auth';
+import { supabaseInsert, supabaseSelect, supabaseUpsert } from '../../../../lib/supabase-admin';
 
 type Subscription = { plan?: string; plan_code?: string; status?: string; expires_at?: string };
 
