@@ -60,6 +60,22 @@ async function json<T>(url: string, provider: string): Promise<T> {
   }
 }
 
+async function providerCoinMarketCap(apiKey: string): Promise<Market[]> {
+  if (!apiKey.trim()) return [];
+  const body = await json<{
+    data?: Record<string, {
+      quote?: { USD?: { price?: number; percent_change_24h?: number; volume_24h?: number }
+    }>
+  }>(
+    'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC,ETH,SOL&convert=USD',
+    'coinmarketcap',
+  );
+  return ASSETS.map(a => {
+    const quote = body.data?.[a.symbol]?.quote?.USD;
+    return market(a.symbol, quote?.price, quote?.percent_change_24h, quote?.volume_24h);
+  }).filter(Boolean) as Market[];
+}
+
 async function providerCoinGecko(): Promise<Market[]> {
   const ids = ASSETS.map(a => a.gecko).join(',');
   const body = await json<Record<string, { usd?: number; usd_24h_change?: number; usd_24h_vol?: number }>>(
@@ -167,7 +183,8 @@ async function loadMarkets(apiKey: string): Promise<{ markets: Market[]; source:
 }
 
 export async function GET() {
-  const result = await loadMarkets();
+  const apiKey = String(process.env.MARKET_DATA_API_KEY ?? '').trim();
+  const result = await loadMarkets(apiKey);
   return NextResponse.json({
     source: result.source,
     mode: result.markets.length ? (result.stale ? 'stale-cache' : 'live') : 'fallback',
