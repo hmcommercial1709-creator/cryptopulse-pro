@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Market = { symbol: string; price: number; change24h: number | null; volume24h: number | null };
 type MarketsResponse = { source: string; updatedAt: string; markets: Market[]; error?: string };
@@ -15,11 +15,26 @@ type TelegramRuntime = { WebApp?: { initData?: string; openTelegramLink?: (url: 
 const getTelegramWebApp = (): TelegramRuntime['WebApp'] => (window as unknown as { Telegram?: TelegramRuntime }).Telegram?.WebApp;
 
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  // Keep interaction on the browser/WebView's native click path. The previous
-  // touchstart+preventDefault shim could suppress the synthetic click in some
-  // Telegram WebView versions and also invoked mouse handlers with a TouchEvent.
-  // React's click event is already normalized for mouse, touch and keyboard input.
-  return <button type="button" {...props} />;
+  // Telegram Desktop/WebView can render the React DOM correctly while its
+  // synthetic event delegation is unreliable in some embedded WebViews.
+  // Bind the action directly to the actual DOM button as a second, native path.
+  const { onClick, ...rest } = props;
+  const ref = useRef<HTMLButtonElement>(null);
+  const handlerRef = useRef(onClick);
+  handlerRef.current = onClick;
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || !handlerRef.current) return;
+    const handleNativeClick = (event: MouseEvent) => {
+      if (node.disabled) return;
+      handlerRef.current?.(event as unknown as React.MouseEvent<HTMLButtonElement>);
+    };
+    node.addEventListener('click', handleNativeClick, { capture: true });
+    return () => node.removeEventListener('click', handleNativeClick, { capture: true });
+  }, []);
+
+  return <button ref={ref} type="button" {...rest} />;
 }
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
