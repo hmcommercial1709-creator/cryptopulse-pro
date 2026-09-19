@@ -8,6 +8,17 @@ const REQUEST_DEDUP_WINDOW_MS = 1_250;
 const recentRequests = new Map<string, number>();
 const inFlightRequests = new Map<string, Promise<void>>();
 
+const DEFAULT_MINI_APP_URL = 'https://cryptopulse-pro-mini-app.hmcommercial1709.workers.dev';
+const MINI_APP_RELEASE = '2026-09-19-13';
+
+function versionedMiniAppUrl(): string {
+  const base = (config.miniAppUrl?.trim() || DEFAULT_MINI_APP_URL).replace(/\/+$/, '');
+  const url = new URL(base);
+  url.pathname = url.pathname.replace(/\/+$/, '') + '/mini';
+  url.searchParams.set('v', MINI_APP_RELEASE);
+  return url.toString();
+}
+
 function requestFingerprint(ctx: any): string {
   const userId = String(ctx.from?.id ?? 'anonymous');
   const action = String(ctx.callbackQuery?.data ?? ctx.message?.text ?? 'update').trim().slice(0, 120);
@@ -160,7 +171,7 @@ function referralMenu(locale: 'en' | 'ar', userId: number): InlineKeyboard {
     keyboard.url(text, `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${shareText}`);
   }
   return keyboard
-    .row().webApp(locale === 'ar' ? '📊 فتح مركز الإحالات في Mini App' : '📊 Open Referral Center in Mini App', `${config.miniAppUrl}/mini/referral`)
+    .row().webApp(locale === 'ar' ? '📊 فتح مركز الإحالات في Mini App' : '📊 Open Referral Center in Mini App', `${versionedMiniAppUrl()}#referral`)
     .row().text(locale === 'ar' ? '👑 لوحة المتصدرين العالمية' : '👑 Global Leaderboard', 'leaderboard')
     .row().text(locale === 'ar' ? '⬅️ الرئيسية' : '⬅️ Home', 'home');
 }
@@ -177,7 +188,7 @@ function requireThreeSnapshots(snapshots: Awaited<ReturnType<typeof getMarketSna
 export function createBot(): Bot {
   const bot = new Bot(requireBotToken());
 
-  const configuredMiniAppUrl = config.miniAppUrl?.trim();
+  const configuredMiniAppUrl = versionedMiniAppUrl();
   if (configuredMiniAppUrl) {
     void bot.api.setChatMenuButton({
       menu_button: {
