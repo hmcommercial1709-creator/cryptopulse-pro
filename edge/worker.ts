@@ -18,6 +18,89 @@ export interface Env {
   MARKET_DATA_API_KEY?: string;
 }
 
+type Locale = 'ar' | 'en';
+
+const I18N: Record<Locale, {
+  startTitle: string;
+  startBody: string;
+  markets: string;
+  signals: string;
+  referral: string;
+  pro: string;
+  miniApp: string;
+  referralCenter: string;
+  referralBody: string;
+  referralOpen: string;
+  proTitle: string;
+  proBody: string;
+  paymentSuccess: string;
+  marketsBody: string;
+  signalsBody: string;
+}> = {
+  en: {
+    startTitle: '🚀 CryptoPulse Pro',
+    startBody:
+      'Automate your digital-market watch with smart market insights and trading signals in one place.\n\n' +
+      '📈 Track market conditions and discover useful market intelligence.\n' +
+      '⚡ Follow smart signals designed to help you monitor opportunities faster.\n' +
+      '💰 Referral rewards: invite friends with your referral link and earn according to the active referral program.\n' +
+      '⭐ Pro Membership: unlock premium features quickly through Telegram Stars.\n\n' +
+      'Choose an option below to get started:',
+    markets: '📈 Markets',
+    signals: '⚡ Signals',
+    referral: '💰 Referral',
+    pro: '⭐ Pro Membership',
+    miniApp: '📊 Open Mini App',
+    referralCenter: '💰 Referral Center',
+    referralBody:
+      'Invite friends with your referral link and track your referral activity from CryptoPulse Pro. Rewards are subject to the current referral-program terms.',
+    referralOpen: '📊 Open Referral Center',
+    proTitle: '⭐ CryptoPulse Pro Membership',
+    proBody:
+      'Unlock premium CryptoPulse Pro features with Telegram Stars. The Mini App provides the fastest way to review available Pro options.',
+    paymentSuccess: '⭐ Payment received successfully. Your Pro membership activation is being processed.',
+    marketsBody:
+      '📈 Markets\n\nMonitor digital-market conditions and access CryptoPulse Pro market intelligence.',
+    signalsBody:
+      '⚡ Signals\n\nReview CryptoPulse Pro smart-signal infrastructure and available trading signals.',
+  },
+  ar: {
+    startTitle: '🚀 CryptoPulse Pro',
+    startBody:
+      'أتمتة متابعة الأسواق الرقمية والوصول إلى معلومات السوق والإشارات الذكية من مكان واحد.\n\n' +
+      '📈 تابع ظروف السوق واكتشف معلومات مفيدة لاتخاذ قراراتك.\n' +
+      '⚡ راقب الإشارات الذكية المصممة لمساعدتك على متابعة الفرص بسرعة.\n' +
+      '💰 نظام الإحالة المربح: ادعُ أصدقاءك عبر رابط الإحالة واكسب وفق شروط برنامج الإحالة النشط.\n' +
+      '⭐ عضوية Pro: فعّل الميزات المميزة بسرعة عبر Telegram Stars.\n\n' +
+      'اختر الخدمة التي تريد البدء بها:',
+    markets: '📈 الأسواق',
+    signals: '⚡ الإشارات',
+    referral: '💰 الإحالة المربحة',
+    pro: '⭐ عضوية Pro',
+    miniApp: '📊 فتح التطبيق',
+    referralCenter: '💰 مركز الإحالة',
+    referralBody:
+      'ادعُ أصدقاءك عبر رابط الإحالة وتابع نشاط الإحالات من داخل CryptoPulse Pro. تخضع المكافآت لشروط برنامج الإحالة الحالي.',
+    referralOpen: '📊 فتح مركز الإحالة',
+    proTitle: '⭐ عضوية CryptoPulse Pro',
+    proBody:
+      'افتح ميزات CryptoPulse Pro المميزة باستخدام Telegram Stars. يوفّر الـMini App أسرع طريقة لاستعراض خيارات Pro المتاحة.',
+    paymentSuccess: '⭐ تم استلام الدفع بنجاح. جارٍ معالجة تفعيل عضوية Pro.',
+    marketsBody:
+      '📈 الأسواق\n\nتابع ظروف الأسواق الرقمية واستفد من معلومات السوق داخل CryptoPulse Pro.',
+    signalsBody:
+      '⚡ الإشارات\n\nاطّلع على بنية الإشارات الذكية وإشارات التداول المتاحة في CryptoPulse Pro.',
+  },
+};
+
+function getLocale(languageCode?: string): Locale {
+  return languageCode?.trim().toLowerCase().startsWith('ar') ? 'ar' : 'en';
+}
+
+function t(locale: Locale) {
+  return I18N[locale];
+}
+
 let cachedBotToken = '';
 let cachedBot: Bot | undefined;
 let cachedBotInitPromise: Promise<Bot> | undefined;
@@ -26,7 +109,7 @@ function getSupabase(env: Env) {
   const url = String(env.SUPABASE_URL ?? '').trim();
   const key = String(env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
 
-  if (!url) throw new Error('Missing SUPABASE_URL Cloudflare Worker secret.');
+  if (!url) throw new Error('Missing SUPABASE_URL Cloudflare Worker variable.');
   if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY Cloudflare Worker secret.');
 
   return {
@@ -88,35 +171,27 @@ async function completeTelegramUpdate(
   });
 }
 
+type TelegramUser = {
+  id?: number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+  language_code?: string;
+};
+
 type TelegramUpdate = {
   update_id: number;
   message?: {
     chat?: { id?: number; type?: string };
-    from?: {
-      id?: number;
-      username?: string;
-      first_name?: string;
-      last_name?: string;
-      language_code?: string;
-    };
+    from?: TelegramUser;
     successful_payment?: Record<string, unknown>;
   };
   callback_query?: {
-    from?: {
-      id?: number;
-      username?: string;
-      first_name?: string;
-      last_name?: string;
-      language_code?: string;
-    };
+    from?: TelegramUser;
     message?: { chat?: { id?: number } };
     data?: string;
   };
 };
-
-function getLocale(languageCode?: string): 'ar' | 'en' {
-  return languageCode?.toLowerCase().startsWith('ar') ? 'ar' : 'en';
-}
 
 function getActorId(update: TelegramUpdate): number | null {
   const id = update.message?.from?.id ?? update.callback_query?.from?.id ?? null;
@@ -137,9 +212,9 @@ async function upsertTelegramUser(env: Env, update: TelegramUpdate): Promise<str
     },
     body: JSON.stringify({
       telegram_user_id: telegramUserId,
-      username: from?.username ?? null,
-      display_name: [from?.first_name, from?.last_name].filter(Boolean).join(' ') || null,
-      language: getLocale(from?.language_code),
+      username: from.username ?? null,
+      display_name: [from.first_name, from.last_name].filter(Boolean).join(' ') || null,
+      language: getLocale(from.language_code),
       updated_at: new Date().toISOString(),
     }),
   });
@@ -217,7 +292,9 @@ async function processReferral(
   });
 
   if (!response.ok) {
-    throw new Error(`Referral insert failed (${response.status}): ${(await response.text()).slice(0, 1000)}`);
+    throw new Error(
+      `Referral insert failed (${response.status}): ${(await response.text()).slice(0, 1000)}`,
+    );
   }
 }
 
@@ -266,7 +343,9 @@ async function processSuccessfulPayment(env: Env, update: TelegramUpdate): Promi
   });
 
   if (!response.ok) {
-    throw new Error(`Stars payment insert failed (${response.status}): ${(await response.text()).slice(0, 1200)}`);
+    throw new Error(
+      `Stars payment insert failed (${response.status}): ${(await response.text()).slice(0, 1200)}`,
+    );
   }
 }
 
@@ -302,63 +381,68 @@ async function getBot(env: Env): Promise<Bot> {
         await processReferral(env, userId, payload);
       }
 
+      const locale = getLocale(ctx.from?.language_code);
+      const copy = t(locale);
       const keyboard = new InlineKeyboard()
-        .text('📈 Markets', 'markets')
-        .text('⚡ Signals', 'signals')
+        .text(copy.markets, 'markets')
+        .text(copy.signals, 'signals')
         .row()
-        .text('💰 Referral', 'referral')
-        .text('⭐ Pro', 'pro');
+        .text(copy.referral, 'referral')
+        .text(copy.pro, 'pro');
 
-      if (env.MINI_APP_URL) {
-        keyboard.row().webApp(
-          '📊 Open Mini App',
-          `${env.MINI_APP_URL.replace(/\/$/, '')}/mini`,
-        );
+      const miniAppUrl = String(env.MINI_APP_URL ?? '').trim().replace(/\/$/, '');
+      if (miniAppUrl) {
+        keyboard.row().webApp(copy.miniApp, `${miniAppUrl}/mini`);
       }
 
-      const locale = getLocale(ctx.from?.language_code);
       await ctx.reply(
-        locale === 'ar'
-          ? '🚀 CryptoPulse Pro\n\nمرحباً بك في CryptoPulse Pro.\n\nاختر الخدمة التي تريد استخدامها:'
-          : '🚀 CryptoPulse Pro\n\nWelcome to CryptoPulse Pro.\n\nChoose a service:',
+        `${copy.startTitle}\n\n${copy.startBody}`,
         { reply_markup: keyboard },
       );
     });
 
     bot.callbackQuery('markets', async (ctx) => {
-      await ctx.editMessageText(
-        '📈 Markets\n\nMarket intelligence is available inside CryptoPulse Pro.',
-      );
+      const locale = getLocale(ctx.from?.language_code);
+      await ctx.editMessageText(t(locale).marketsBody);
     });
 
     bot.callbackQuery('signals', async (ctx) => {
-      await ctx.editMessageText(
-        '⚡ Signals\n\nCryptoPulse signal infrastructure is online.',
-      );
+      const locale = getLocale(ctx.from?.language_code);
+      await ctx.editMessageText(t(locale).signalsBody);
     });
 
     bot.callbackQuery('referral', async (ctx) => {
-      const url = env.MINI_APP_URL
-        ? `${env.MINI_APP_URL.replace(/\/$/, '')}/mini/referral`
-        : null;
+      const locale = getLocale(ctx.from?.language_code);
+      const copy = t(locale);
+      const miniAppUrl = String(env.MINI_APP_URL ?? '').trim().replace(/\/$/, '');
+      const url = miniAppUrl ? `${miniAppUrl}/mini/referral` : null;
 
       await ctx.editMessageText(
-        '💰 Referral Center\n\nYour referral activity is protected against duplicate Telegram updates.',
+        `${copy.referralCenter}\n\n${copy.referralBody}`,
         url
-          ? { reply_markup: new InlineKeyboard().url('📊 Open Referral Center', url) }
+          ? { reply_markup: new InlineKeyboard().url(copy.referralOpen, url) }
           : undefined,
       );
     });
 
     bot.callbackQuery('pro', async (ctx) => {
+      const locale = getLocale(ctx.from?.language_code);
+      const copy = t(locale);
+      const miniAppUrl = String(env.MINI_APP_URL ?? '').trim().replace(/\/$/, '');
+      const url = miniAppUrl ? `${miniAppUrl}/mini/pro` : null;
+
       await ctx.editMessageText(
-        '⭐ CryptoPulse Pro\n\nPro features are available through Telegram Stars.',
+        `${copy.proTitle}\n\n${copy.proBody}`,
+        url
+          ? { reply_markup: new InlineKeyboard().url(copy.miniApp, url) }
+          : undefined,
       );
     });
 
     bot.on('message:successful_payment', async (ctx) => {
       await processSuccessfulPayment(env, ctx.update as TelegramUpdate);
-      await ctx.reply('⭐ Payment received successfully.');
+      const locale = getLocale(ctx.from?.language_code);
+      await ctx.reply(t(locale).paymentSuccess);
     });
 
     bot.catch((error) => {
@@ -390,9 +474,7 @@ function validateTelegramUpdate(value: unknown): value is TelegramUpdate {
 function webhookSecretMatches(request: Request, env: Env): boolean {
   const configured = String(env.TELEGRAM_WEBHOOK_SECRET ?? '').trim();
   if (!configured) return true;
-  return (
-    request.headers.get('x-telegram-bot-api-secret-token') ?? ''
-  ) === configured;
+  return (request.headers.get('x-telegram-bot-api-secret-token') ?? '') === configured;
 }
 
 export default {
