@@ -427,7 +427,7 @@ async function getBot(env: Env): Promise<Bot> {
     bot.callbackQuery('referral', async (ctx) => {
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
-      const miniAppUrl = String(env.MINI_APP_URL ?? '').trim().replace(/\/$/, '');
+      const miniAppUrl = getMiniAppBaseUrl(env);
       const url = miniAppUrl ? `${miniAppUrl}/mini/referral` : null;
 
       await ctx.editMessageText(
@@ -441,7 +441,7 @@ async function getBot(env: Env): Promise<Bot> {
     bot.callbackQuery('pro', async (ctx) => {
       const locale = getLocale(ctx.from?.language_code);
       const copy = t(locale);
-      const miniAppUrl = String(env.MINI_APP_URL ?? '').trim().replace(/\/$/, '');
+      const miniAppUrl = getMiniAppBaseUrl(env);
       const url = miniAppUrl ? `${miniAppUrl}/mini/pro` : null;
 
       await ctx.editMessageText(
