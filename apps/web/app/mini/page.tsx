@@ -255,7 +255,27 @@ export default function MiniTradingTerminal() {
                     <strong>⭐{plan.price_stars}</strong>
                   </div>
                   <div style={{ opacity: 0.7, fontSize: 12, marginTop: 8 }}>{plan.features.join(' · ')}</div>
-                  <button onClick={() => { const tg = getTelegramWebApp(); if (tg?.sendData) tg.sendData(JSON.stringify({ type: 'buy_plan', plan: plan.code })); else setAgentTaskMessage('Open the bot and use /plans to purchase this plan.'); void track('plan_select', { plan: plan.code }); }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }}>⭐ Choose {plan.name}</button>
+                  <button onClick={async () => {
+                    setBusy(true);
+                    setError('');
+                    try {
+                      const tg = getTelegramWebApp();
+                      const response = await fetch('https://cryptopulse-pro-edge.hmcommercial1709.workers.dev/invoice', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-telegram-init-data': tg?.initData ?? '' },
+                        body: JSON.stringify({ plan: plan.code }),
+                      });
+                      const body = await response.json() as { invoiceUrl?: string; error?: string };
+                      if (!response.ok || !body.invoiceUrl) throw new Error(body.error ?? 'Unable to open Telegram checkout.');
+                      if (tg?.openTelegramLink) tg.openTelegramLink(body.invoiceUrl);
+                      else window.open(body.invoiceUrl, '_blank', 'noopener,noreferrer');
+                      void track('plan_select', { plan: plan.code });
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Unable to open Telegram checkout.');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }} style={{ ...buttonStyle, marginTop: 10, width: '100%', background: plan.code.startsWith('vip') ? '#8b5cf6' : '#d97706' }} disabled={busy}>⭐ Choose {plan.name}</button>
                 </div>
               ))}
             </div>
